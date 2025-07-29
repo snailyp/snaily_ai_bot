@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小蜗AI助手 - 控制面板</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-emoji-smile"></i>
+                小蜗AI助手控制面板
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text">
+                    <i class="bi bi-circle-fill text-success"></i>
+                    在线
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- 状态概览 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-speedometer2"></i>
+                            系统状态
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="status-overview">
+                            <!-- 状态信息将通过 JavaScript 动态加载 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 功能开关 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="bi bi-toggles"></i>
+                            功能开关
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="feature-toggle">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">💬 AI 对话</h6>
+                                            <small class="text-muted">智能对话功能</small>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="toggle-chat" data-feature="chat">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="feature-toggle">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">🎨 AI 绘画</h6>
+                                            <small class="text-muted">图片生成功能</small>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="toggle-drawing" data-feature="drawing">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="feature-toggle">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">🔍 联网搜索</h6>
+                                            <small class="text-muted">信息搜索功能</small>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="toggle-search" data-feature="search">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="feature-toggle">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">📝 群聊总结</h6>
+                                            <small class="text-muted">自动总结功能</small>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="toggle-auto_summary" data-feature="auto_summary">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="feature-toggle">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">👋 欢迎新成员</h6>
+                                            <small class="text-muted">新成员欢迎功能</small>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" id="toggle-welcome_message" data-feature="welcome_message">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 配置选项卡 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <ul class="nav nav-tabs card-header-tabs" id="configTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="ai-tab" data-bs-toggle="tab" data-bs-target="#ai-config" type="button" role="tab">
+                                    <i class="bi bi-cpu"></i> AI 配置
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="welcome-tab" data-bs-toggle="tab" data-bs-target="#welcome-config" type="button" role="tab">
+                                    <i class="bi bi-chat-heart"></i> 欢迎消息
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary-config" type="button" role="tab">
+                                    <i class="bi bi-file-text"></i> 总结设置
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced-config" type="button" role="tab">
+                                    <i class="bi bi-gear"></i> 高级设置
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content" id="configTabsContent">
+                            <!-- AI 配置 -->
+                            <div class="tab-pane fade show active" id="ai-config" role="tabpanel">
+                                <form id="ai-config-form">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h6 class="mb-3">OpenAI 配置</h6>
+                                            <div class="mb-3">
+                                                <label for="openai-api-key" class="form-label">API Key</label>
+                                                <input type="password" class="form-control" id="openai-api-key" placeholder="sk-...">
+                                                <div class="form-text">OpenAI API 密钥</div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="openai-model" class="form-label">对话模型</label>
+                                                <select class="form-select" id="openai-model">
+                                                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                                                    <option value="gpt-4">GPT-4</option>
+                                                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="max-tokens" class="form-label">最大 Token 数</label>
+                                                <input type="number" class="form-control" id="max-tokens" min="100" max="4000" value="1000">
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="temperature" class="form-label">创造性 (Temperature)</label>
+                                                <input type="range" class="form-range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+                                                <div class="d-flex justify-content-between">
+                                                    <small>保守 (0)</small>
+                                                    <small id="temperature-value">0.7</small>
+                                                    <small>创新 (2)</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h6 class="mb-3">绘画配置</h6>
+                                            <div class="mb-3">
+                                                <label for="drawing-model" class="form-label">绘画模型</label>
+                                                <select class="form-select" id="drawing-model">
+                                                    <option value="dall-e-3">DALL-E 3</option>
+                                                    <option value="dall-e-2">DALL-E 2</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="image-size" class="form-label">图片尺寸</label>
+                                                <select class="form-select" id="image-size">
+                                                    <option value="1024x1024">1024x1024</option>
+                                                    <option value="1792x1024">1792x1024</option>
+                                                    <option value="1024x1792">1024x1792</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="image-quality" class="form-label">图片质量</label>
+                                                <select class="form-select" id="image-quality">
+                                                    <option value="standard">标准</option>
+                                                    <option value="hd">高清</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="daily-limit" class="form-label">每日绘画限制</label>
+                                                <input type="number" class="form-control" id="daily-limit" min="0" max="100" value="10">
+                                                <div class="form-text">0 表示无限制</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-lg"></i> 保存 AI 配置
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- 欢迎消息配置 -->
+                            <div class="tab-pane fade" id="welcome-config" role="tabpanel">
+                                <form id="welcome-config-form">
+                                    <div class="mb-3">
+                                        <label for="welcome-message" class="form-label">欢迎消息模板</label>
+                                        <textarea class="form-control" id="welcome-message" rows="6" placeholder="欢迎 {user_name} 加入群聊！"></textarea>
+                                        <div class="form-text">
+                                            可用变量：<code>{user_name}</code> - 用户名，<code>{user_mention}</code> - 用户提及，<code>{chat_title}</code> - 群聊标题
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="card bg-light">
+                                            <div class="card-body">
+                                                <h6 class="card-title">预览效果</h6>
+                                                <div id="welcome-preview" class="text-muted">
+                                                    在上方输入欢迎消息模板以查看预览效果
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-lg"></i> 保存欢迎消息
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- 总结设置 -->
+                            <div class="tab-pane fade" id="summary-config" role="tabpanel">
+                                <form id="summary-config-form">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="summary-interval" class="form-label">总结间隔 (小时)</label>
+                                                <input type="number" class="form-control" id="summary-interval" min="1" max="168" value="24">
+                                                <div class="form-text">自动总结的时间间隔</div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="min-messages" class="form-label">最少消息数</label>
+                                                <input type="number" class="form-control" id="min-messages" min="5" max="1000" value="50">
+                                                <div class="form-text">触发总结的最少消息数量</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="summary-prompt" class="form-label">总结提示词</label>
+                                                <textarea class="form-control" id="summary-prompt" rows="4" placeholder="请总结以下群聊对话的主要内容和话题："></textarea>
+                                                <div class="form-text">AI 总结时使用的提示词</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-lg"></i> 保存总结设置
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- 高级设置 -->
+                            <div class="tab-pane fade" id="advanced-config" role="tabpanel">
+                                <div class="alert alert-warning">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                    <strong>注意：</strong> 修改这些设置可能影响机器人的正常运行，请谨慎操作。
+                                </div>
+                                <form id="advanced-config-form">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <h6 class="mb-3">日志设置</h6>
+                                            <div class="mb-3">
+                                                <label for="log-level" class="form-label">日志级别</label>
+                                                <select class="form-select" id="log-level">
+                                                    <option value="DEBUG">DEBUG</option>
+                                                    <option value="INFO">INFO</option>
+                                                    <option value="WARNING">WARNING</option>
+                                                    <option value="ERROR">ERROR</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <h6 class="mb-3">Web 面板设置</h6>
+                                            <div class="mb-3">
+                                                <label for="webapp-port" class="form-label">端口号</label>
+                                                <input type="number" class="form-control" id="webapp-port" min="1000" max="65535" value="5000">
+                                                <div class="form-text">重启后生效</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-warning">
+                                        <i class="bi bi-gear"></i> 保存高级设置
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="notification-toast" class="toast" role="alert">
+            <div class="toast-header">
+                <i class="bi bi-info-circle text-primary me-2"></i>
+                <strong class="me-auto">通知</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toast-message">
+                <!-- 消息内容 -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
