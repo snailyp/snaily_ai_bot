@@ -67,6 +67,8 @@ class TelegramBot:
 
     def register_handlers(self):
         """注册消息处理器"""
+        if not self.application:
+            raise RuntimeError("Application 未初始化")
         app = self.application
 
         # 基础命令
@@ -113,17 +115,37 @@ class TelegramBot:
         self.scheduler.start()
         logger.info("定时任务设置完成")
 
-    async def start_polling(self):
-        """开始轮询"""
+    async def start_bot(self):
+        """启动机器人 - 支持 Webhook 和 Polling 模式"""
+        if not self.application:
+            raise RuntimeError("Application 未初始化")
+
         try:
             logger.info("开始启动机器人...")
             await self.application.initialize()
             await self.application.start()
-            await self.application.updater.start_polling()
-            logger.info("机器人启动成功，开始监听消息...")
 
-            # 保持运行
-            await asyncio.Event().wait()
+            # 从环境变量获取配置
+            port = int(os.environ.get("PORT", 8443))
+            webhook_url = os.environ.get("RENDER_EXTERNAL_URL")
+            bot_token = config_manager.get_bot_token()
+
+            if webhook_url:
+                # 在生产环境 (Render) 中使用 Webhook
+                logger.info(f"使用 Webhook 模式启动机器人，端口: {port}")
+                logger.info(f"Webhook URL: {webhook_url}/{bot_token}")
+
+                self.application.run_webhook(
+                    listen="0.0.0.0",
+                    port=port,
+                    url_path=bot_token,  # 使用 token 作为路径增加安全性
+                    webhook_url=f"{webhook_url}/{bot_token}",
+                )
+            else:
+                # 在本地开发环境中使用轮询
+                logger.info("未检测到 Webhook URL，使用轮询模式进行本地开发...")
+                self.application.run_polling()
+                logger.info("机器人启动成功，开始监听消息...")
 
         except KeyboardInterrupt:
             logger.info("收到停止信号，正在关闭机器人...")
@@ -133,6 +155,10 @@ class TelegramBot:
         finally:
             await self.stop()
 
+    async def start_polling(self):
+        """保持向后兼容的轮询启动方法"""
+        await self.start_bot()
+
     async def stop(self):
         """停止机器人"""
         try:
@@ -140,7 +166,6 @@ class TelegramBot:
                 self.scheduler.shutdown()
 
             if self.application:
-                await self.application.updater.stop()
                 await self.application.stop()
                 await self.application.shutdown()
 
@@ -175,7 +200,7 @@ async def main():
     # 创建并启动机器人
     bot = TelegramBot()
     await bot.setup_bot()
-    await bot.start_polling()
+    await bot.start_bot()
 
 
 if __name__ == "__main__":

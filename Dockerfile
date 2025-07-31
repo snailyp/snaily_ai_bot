@@ -23,8 +23,8 @@ COPY . .
 # 创建必要的目录
 RUN mkdir -p logs data
 
-# 暴露 Web 应用端口
-EXPOSE 5000
+# 暴露 Webhook 服务端口
+EXPOSE 8443
 
 # 设置启动命令
 CMD ["python", "run_bot.py"]

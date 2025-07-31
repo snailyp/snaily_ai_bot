@@ -37,7 +37,7 @@ async def run_bot():
         # 创建并启动机器人
         bot = TelegramBot()
         await bot.setup_bot()
-        await bot.start_polling()
+        await bot.start_bot()
 
     except Exception as e:
         logger.error(f"机器人启动失败: {e}")
