@@ -21,9 +21,24 @@ class AIServices:
     def _setup_openai(self):
         """设置 OpenAI 客户端"""
         try:
-            api_key = config_manager.get_openai_api_key()
-            self.openai_client = openai.AsyncOpenAI(api_key=api_key)
-            logger.info("OpenAI 客户端初始化成功")
+            active_config = config_manager.get_active_openai_config()
+            if not active_config:
+                logger.error("没有找到活动的 OpenAI 配置")
+                self.openai_client = None
+                return
+
+            api_key = active_config.get("api_key")
+            base_url = active_config.get("api_base_url", "https://api.openai.com/v1")
+
+            if not api_key:
+                logger.error("活动的 OpenAI 配置中缺少 API Key")
+                self.openai_client = None
+                return
+
+            self.openai_client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+            logger.info(
+                f"OpenAI 客户端初始化成功，使用配置: {active_config.get('name', '未命名')}，base_url: {base_url}"
+            )
         except Exception as e:
             logger.error(f"OpenAI 客户端初始化失败: {e}")
             self.openai_client = None
@@ -48,8 +63,9 @@ class AIServices:
                     return "抱歉，AI 服务暂时不可用。"
 
             # 获取配置
-            ai_config = config_manager.get_ai_config()
-            openai_config = ai_config.get("openai", {})
+            openai_config = config_manager.get_active_openai_config()
+            if not openai_config:
+                return "抱歉，AI 服务配置不正确。"
 
             model = openai_config.get("model", "gpt-3.5-turbo")
             max_tokens = openai_config.get("max_tokens", 1000)

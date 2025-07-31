@@ -70,7 +70,7 @@ def main():
 
         # 检查必要的配置
         try:
-            bot_token = config_manager.get_bot_token()
+            config_manager.get_bot_token()
             logger.info("✅ Telegram Bot Token 已配置")
         except ValueError as e:
             logger.error(f"❌ {e}")
@@ -78,7 +78,7 @@ def main():
             return
 
         try:
-            openai_key = config_manager.get_openai_api_key()
+            config_manager.get_openai_api_key()
             logger.info("✅ OpenAI API Key 已配置")
         except ValueError as e:
             logger.warning(f"⚠️ {e}")
@@ -96,11 +96,7 @@ def main():
         host = webapp_config.get("host", "0.0.0.0")
         port = webapp_config.get("port", 5000)
 
-        if host == "0.0.0.0":
-            logger.info(f"🌐 Web 控制面板: http://localhost:{port}")
-        else:
-            logger.info(f"🌐 Web 控制面板: http://{host}:{port}")
-
+        logger.info(f"🌐 Web 控制面板: http://{host}:{port}")
         logger.info("🚀 启动 Telegram 机器人...")
 
         # 启动机器人（在主线程中）

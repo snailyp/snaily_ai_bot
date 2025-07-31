@@ -3,17 +3,28 @@
 包含 /start, /help, /status 等基础命令
 """
 
+from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
-from loguru import logger
+
 from config.settings import config_manager
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /start 命令"""
     try:
+        message = update.message
         user = update.effective_user
         chat = update.effective_chat
+
+        if not all([message, user, chat]):
+            logger.warning("处理命令时缺少必要上下文 (message, user, or chat)")
+            return
+
+        # 类型断言，确保类型检查器理解这些变量不为 None
+        assert message is not None
+        assert user is not None
+        assert chat is not None
 
         welcome_text = f"""
 🐌 **你好！我是小蜗AI助手！**
@@ -40,19 +51,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 我是一个可爱、稳重的AI助手，像小蜗牛一样踏实可靠，致力于为您提供最好的服务体验！🐌
         """
 
-        await update.message.reply_text(welcome_text, parse_mode="Markdown")
+        await message.reply_text(welcome_text, parse_mode="Markdown")
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /start 命令")
 
     except Exception as e:
         logger.error(f"处理 /start 命令时出错: {e}")
-        await update.message.reply_text("抱歉，处理命令时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，处理命令时出现错误。")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /help 命令"""
     try:
+        message = update.message
         user = update.effective_user
+        chat = update.effective_chat
+
+        if not all([message, user, chat]):
+            logger.warning("处理命令时缺少必要上下文 (message, user, or chat)")
+            return
+
+        # 类型断言，确保类型检查器理解这些变量不为 None
+        assert message is not None
+        assert user is not None
+        assert chat is not None
 
         help_text = """
 📖 **详细帮助文档**
@@ -96,19 +119,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 需要更多帮助？请联系管理员或查看项目文档。
         """
 
-        await update.message.reply_text(help_text, parse_mode="Markdown")
+        await message.reply_text(help_text, parse_mode="Markdown")
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /help 命令")
 
     except Exception as e:
         logger.error(f"处理 /help 命令时出错: {e}")
-        await update.message.reply_text("抱歉，处理命令时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，处理命令时出现错误。")
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /status 命令"""
     try:
+        message = update.message
         user = update.effective_user
+        chat = update.effective_chat
+
+        if not all([message, user, chat]):
+            logger.warning("处理命令时缺少必要上下文 (message, user, or chat)")
+            return
+
+        # 类型断言，确保类型检查器理解这些变量不为 None
+        assert message is not None
+        assert user is not None
+        assert chat is not None
 
         # 检查功能状态
         features = config_manager.get_features_config()
@@ -142,13 +177,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             status_text += "👤 **用户权限：** 普通用户\n"
 
         status_text += (
-            f"\n⏰ **查询时间：** {update.message.date.strftime('%Y-%m-%d %H:%M:%S')}"
+            f"\n⏰ **查询时间：** {message.date.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        await update.message.reply_text(status_text, parse_mode="Markdown")
+        await message.reply_text(status_text, parse_mode="Markdown")
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /status 命令")
 
     except Exception as e:
         logger.error(f"处理 /status 命令时出错: {e}")
-        await update.message.reply_text("抱歉，处理命令时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，处理命令时出现错误。")

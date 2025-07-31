@@ -2,26 +2,38 @@
 AI 绘画功能处理器
 """
 
+from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
-from loguru import logger
-from config.settings import config_manager
+
 from bot.services.ai_services import ai_services
+from config.settings import config_manager
 
 
 async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /draw 命令"""
     try:
+        message = update.message
         user = update.effective_user
+        chat = update.effective_chat
+
+        if not all([message, user, chat]):
+            logger.warning("处理命令时缺少必要上下文 (message, user, or chat)")
+            return
+
+        # 类型断言，确保类型检查器理解这些变量不为 None
+        assert message is not None
+        assert user is not None
+        assert chat is not None
 
         # 检查功能是否启用
         if not config_manager.is_feature_enabled("drawing"):
-            await update.message.reply_text("抱歉，AI 绘画功能当前已禁用。")
+            await message.reply_text("抱歉，AI 绘画功能当前已禁用。")
             return
 
         # 获取绘画描述
         if not context.args:
-            await update.message.reply_text(
+            await message.reply_text(
                 "请在命令后输入您想要绘制的图片描述。\n\n"
                 "例如：`/draw 一只可爱的小猫在花园里玩耍`\n\n"
                 "💡 **绘画提示：**\n"
@@ -43,7 +55,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             pass
 
         # 发送"正在绘制"消息
-        drawing_message = await update.message.reply_text(
+        drawing_message = await message.reply_text(
             "🎨 AI 正在为您绘制图片，请稍候...\n\n" f"📝 **描述：** {prompt}"
         )
 
@@ -57,7 +69,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             # 发送图片
             caption = f"🎨 **AI 绘画作品**\n\n📝 **描述：** {prompt}\n👤 **创作者：** {user.first_name}"
 
-            await update.message.reply_photo(
+            await message.reply_photo(
                 photo=image_url, caption=caption, parse_mode="Markdown"
             )
 
@@ -78,12 +90,26 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     except Exception as e:
         logger.error(f"处理 /draw 命令时出错: {e}")
-        await update.message.reply_text("抱歉，处理绘画请求时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，处理绘画请求时出现错误。")
 
 
 async def draw_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /draw_help 命令，提供绘画帮助"""
     try:
+        message = update.message
+        user = update.effective_user
+        chat = update.effective_chat
+
+        if not all([message, user, chat]):
+            logger.warning("处理命令时缺少必要上下文 (message, user, or chat)")
+            return
+
+        # 类型断言，确保类型检查器理解这些变量不为 None
+        assert message is not None
+        assert user is not None
+        assert chat is not None
+
         help_text = """
 🎨 **AI 绘画功能帮助**
 
@@ -123,10 +149,11 @@ async def draw_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 开始创作您的专属 AI 艺术作品吧！🎭
         """
 
-        await update.message.reply_text(help_text, parse_mode="Markdown")
+        await message.reply_text(help_text, parse_mode="Markdown")
 
-        logger.info(f"用户 {update.effective_user.id} 查看了绘画帮助")
+        logger.info(f"用户 {user.id} 查看了绘画帮助")
 
     except Exception as e:
         logger.error(f"处理 /draw_help 命令时出错: {e}")
-        await update.message.reply_text("抱歉，获取帮助信息时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，获取帮助信息时出现错误。")

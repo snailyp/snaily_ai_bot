@@ -24,3 +24,5 @@ APScheduler==3.10.4
 
 # JSON 处理
 ujson==5.8.0
+# Redis 缓存
+redis

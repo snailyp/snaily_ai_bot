@@ -6,14 +6,23 @@ Web 控制面板应用
 import os
 import sys
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from flask_cors import CORS
 from loguru import logger
 
-# 添加项目根目录到 Python 路径
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from config.settings import config_manager
+
+# 添加项目根目录到 Python 路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
 def create_app():
@@ -33,6 +42,61 @@ def create_app():
 app = create_app()
 
 
+@app.before_request
+def require_login():
+    """登录校验中间件"""
+    # 允许访问的路由（无需登录）
+    allowed_routes = ["login", "static", "favicon.ico"]
+
+    # 检查当前请求的端点
+    if request.endpoint and request.endpoint in allowed_routes:
+        return
+
+    # 检查是否已登录
+    if not session.get("logged_in"):
+        return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """登录页面和处理"""
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        # 获取配置中的用户名和密码
+        webapp_config = config_manager.get_webapp_config()
+        correct_username = webapp_config.get("username")
+        correct_password = webapp_config.get("password")
+
+        # 检查配置是否设置
+        if not correct_username or not correct_password:
+            flash(
+                "系统配置错误：未设置登录用户名或密码，请检查环境变量 WEB_USERNAME 和 WEB_PASSWORD"
+            )
+            return render_template("login.html")
+
+        # 验证用户名和密码
+        if username == correct_username and password == correct_password:
+            session["logged_in"] = True
+            logger.info(f"用户 {username} 成功登录控制面板")
+            return redirect(url_for("index"))
+        else:
+            flash("用户名或密码错误")
+            logger.warning(f"登录失败：用户名 {username}")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    """登出"""
+    session.pop("logged_in", None)
+    flash("您已成功登出")
+    logger.info("用户已登出控制面板")
+    return redirect(url_for("login"))
+
+
 @app.route("/")
 def index():
     """主页"""
@@ -46,7 +110,33 @@ def index():
             "logging": config_manager.get("logging", {}),
         }
 
-        return render_template("index.html", config=config)
+        # 获取聊天模型列表和当前模型
+        ai_config = config_manager.get_ai_config()
+        openai_configs = ai_config.get("openai_configs", [{}])
+        active_index = ai_config.get("active_openai_config_index", 0)
+
+        # 默认的聊天模型列表
+        chat_models = [
+            {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
+            {"id": "gpt-4", "name": "GPT-4"},
+            {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+            {"id": "gpt-4o", "name": "GPT-4o"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+        ]
+
+        # 获取当前选中的模型
+        current_chat_model = "gpt-3.5-turbo"
+        if openai_configs and len(openai_configs) > active_index:
+            current_chat_model = openai_configs[active_index].get(
+                "model", "gpt-3.5-turbo"
+            )
+
+        return render_template(
+            "index.html",
+            config=config,
+            chat_models=chat_models,
+            current_chat_model=current_chat_model,
+        )
 
     except Exception as e:
         logger.error(f"加载主页时出错: {e}")
@@ -65,19 +155,6 @@ def get_config():
             "logging": config_manager.get("logging", {}),
         }
 
-        # 隐藏敏感信息
-        if "bot_token" in config["telegram"]:
-            config["telegram"]["bot_token"] = (
-                "***已设置***" if config["telegram"]["bot_token"] else "未设置"
-            )
-
-        if "api_key" in config["ai_services"].get("openai", {}):
-            config["ai_services"]["openai"]["api_key"] = (
-                "***已设置***"
-                if config["ai_services"]["openai"]["api_key"]
-                else "未设置"
-            )
-
         return jsonify({"success": True, "config": config})
 
     except Exception as e:
@@ -93,26 +170,7 @@ def update_config():
 
         if not data:
             return jsonify({"success": False, "error": "无效的请求数据"}), 400
-
-        # 构建新的设置字典，将配置项转换为环境变量格式
-        new_settings = {}
-
-        # 更新配置
-        for key, value in data.items():
-            if isinstance(value, dict):
-                for sub_key, sub_value in value.items():
-                    config_manager.set(f"{key}.{sub_key}", sub_value)
-                    # 转换为环境变量格式
-                    env_key = f"{key.upper()}_{sub_key.upper()}"
-                    new_settings[env_key] = sub_value
-            else:
-                config_manager.set(key, value)
-                # 转换为环境变量格式
-                env_key = key.upper()
-                new_settings[env_key] = value
-
-        # 保存配置到 .env 文件
-        config_manager.save_config(new_settings)
+        config_manager.save_config(data)
 
         logger.info("配置已通过 Web 面板更新")
         return jsonify({"success": True, "message": "配置已保存并将在30秒内生效"})
@@ -185,31 +243,22 @@ def update_ai_config():
     try:
         data = request.get_json()
 
-        # 构建新的设置字典
-        new_settings = {}
-
         # 更新 OpenAI 配置
-        if "openai" in data:
-            openai_config = data["openai"]
-            for key, value in openai_config.items():
-                if key == "api_key" and value == "***已设置***":
-                    continue  # 跳过占位符
-                config_manager.set(f"ai_services.openai.{key}", value)
-                # 转换为环境变量格式
-                env_key = f"OPENAI_{key.upper()}"
-                new_settings[env_key] = value
+        if "openai_configs" in data:
+            openai_configs = data["openai_configs"]
+            config_manager.set("ai_services.openai_configs", openai_configs)
+
+        if "active_openai_config_index" in data:
+            index = int(data["active_openai_config_index"])
+            config_manager.set("ai_services.active_openai_config_index", index)
 
         # 更新绘画配置
         if "drawing" in data:
             drawing_config = data["drawing"]
             for key, value in drawing_config.items():
                 config_manager.set(f"ai_services.drawing.{key}", value)
-                # 转换为环境变量格式
-                env_key = f"DRAWING_{key.upper()}"
-                new_settings[env_key] = value
 
-        # 保存配置到 .env 文件
-        config_manager.save_config(new_settings)
+        config_manager.save_config_to_redis()
 
         logger.info("AI 配置已更新")
         return jsonify({"success": True, "message": "AI 配置已更新"})
@@ -217,6 +266,92 @@ def update_ai_config():
     except Exception as e:
         logger.error(f"更新 AI 配置时出错: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/openai/models", methods=["POST"])
+def get_openai_models():
+    """获取OpenAI模型列表 API"""
+    import openai
+
+    try:
+        data = request.get_json()
+        api_key = data.get("api_key")
+        base_url = data.get("api_base_url", "https://api.openai.com/v1")
+
+        if not api_key:
+            return jsonify({"success": False, "error": "OpenAI API Key 未配置"}), 400
+
+        # 创建OpenAI客户端
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+
+        # 获取模型列表
+        models_response = client.models.list()
+
+        # 过滤出聊天模型和图像生成模型
+        chat_models = []
+        image_models = []
+
+        for model in models_response.data:
+            model_id = model.id
+            # 图像生成模型（优先检查）
+            if any(
+                keyword in model_id.lower()
+                for keyword in ["dall-e", "dalle", "sd", "stable-diffusion", "image"]
+            ):
+                image_models.append({"id": model_id, "name": model_id, "type": "image"})
+            # 聊天模型
+            elif any(
+                keyword in model_id.lower()
+                for keyword in [
+                    "gpt",
+                    "chat",
+                    "turbo",
+                    "claude",
+                    "llama",
+                    "gemini",
+                    "mistral",
+                    "command",
+                    "instruct",
+                ]
+            ):
+                chat_models.append({"id": model_id, "name": model_id, "type": "chat"})
+
+        # 如果API没有返回预期的模型，提供默认模型列表
+        if not chat_models:
+            chat_models = [
+                {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "type": "chat"},
+                {"id": "gpt-4", "name": "GPT-4", "type": "chat"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "type": "chat"},
+                {"id": "gpt-4o", "name": "GPT-4o", "type": "chat"},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "type": "chat"},
+            ]
+
+        if not image_models:
+            image_models = [
+                {"id": "dall-e-2", "name": "DALL-E 2", "type": "image"},
+                {"id": "dall-e-3", "name": "DALL-E 3", "type": "image"},
+            ]
+
+        logger.info(
+            f"获取到 {len(chat_models)} 个聊天模型和 {len(image_models)} 个图像模型"
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "models": {
+                    "chat": sorted(chat_models, key=lambda x: x["id"]),
+                    "image": sorted(image_models, key=lambda x: x["id"]),
+                },
+            }
+        )
+
+    except openai.AuthenticationError:
+        logger.error("OpenAI API 认证失败")
+        return jsonify({"success": False, "error": "OpenAI API Key 无效"}), 401
+    except Exception as e:
+        logger.error(f"获取OpenAI模型列表时出错: {e}")
+        return jsonify({"success": False, "error": f"获取模型列表失败: {str(e)}"}), 500
 
 
 @app.route("/api/status")
@@ -237,9 +372,7 @@ def get_status():
             },
             "config_status": {
                 "bot_token": bool(config_manager.get("telegram.bot_token")),
-                "openai_api_key": bool(
-                    config_manager.get("ai_services.openai.api_key")
-                ),
+                "openai_api_key": bool(config_manager.get_openai_api_key()),
             },
         }
 
@@ -247,6 +380,23 @@ def get_status():
 
     except Exception as e:
         logger.error(f"获取状态时出错: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/config/reset", methods=["POST"])
+def reset_config():
+    """重置配置 API - 从环境变量重新加载配置，修复被占位符污染的缓存"""
+    try:
+        # 强制从环境变量重新加载配置
+        config_manager.reset_config_from_env()
+
+        logger.info("配置已通过 Web 面板重置")
+        return jsonify(
+            {"success": True, "message": "配置已从环境变量重新加载，占位符问题已修复"}
+        )
+
+    except Exception as e:
+        logger.error(f"重置配置时出错: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -276,6 +426,71 @@ def run_webapp():
     except Exception as e:
         logger.error(f"启动 Web 应用失败: {e}")
         raise
+
+
+def get_chat_models_for_config(openai_configs, active_index):
+    """根据当前配置动态获取聊天模型列表"""
+    # 默认模型列表
+    default_models = [
+        {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
+        {"id": "gpt-4", "name": "GPT-4"},
+        {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+        {"id": "gpt-4o", "name": "GPT-4o"},
+        {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+    ]
+
+    # 如果没有配置或配置无效，返回默认列表
+    if not openai_configs or len(openai_configs) <= active_index:
+        return default_models
+
+    current_config = openai_configs[active_index]
+    api_key = current_config.get("api_key")
+    base_url = current_config.get("api_base_url", "https://api.openai.com/v1")
+
+    # 如果没有API密钥，返回默认列表
+    if not api_key:
+        return default_models
+
+    try:
+        import openai
+
+        # 创建OpenAI客户端
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+
+        # 获取模型列表
+        models_response = client.models.list()
+
+        # 过滤出聊天模型
+        chat_models = []
+        for model in models_response.data:
+            model_id = model.id
+            # 聊天模型
+            if any(
+                keyword in model_id.lower()
+                for keyword in [
+                    "gpt",
+                    "chat",
+                    "turbo",
+                    "claude",
+                    "llama",
+                    "gemini",
+                    "mistral",
+                    "command",
+                    "instruct",
+                ]
+            ):
+                chat_models.append({"id": model_id, "name": model_id})
+
+        # 如果API没有返回预期的模型，返回默认模型列表
+        if not chat_models:
+            return default_models
+
+        # 按模型ID排序
+        return sorted(chat_models, key=lambda x: x["id"])
+
+    except Exception as e:
+        logger.warning(f"动态获取模型列表失败，使用默认列表: {e}")
+        return default_models
 
 
 if __name__ == "__main__":

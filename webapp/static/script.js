@@ -64,26 +64,48 @@ class BotControlPanel {
     // 更新AI配置表单
     updateAIConfigForm() {
         const aiConfig = this.config.ai_services || {};
-        const openaiConfig = aiConfig.openai || {};
+        const openaiConfigs = aiConfig.openai_configs || [{}];
+        const activeIndex = aiConfig.active_openai_config_index || 0;
         const drawingConfig = aiConfig.drawing || {};
 
-        // OpenAI 配置
-        this.setFormValue('openai-api-key', openaiConfig.api_key || '');
-        this.setFormValue('openai-model', openaiConfig.model || 'gpt-3.5-turbo');
-        this.setFormValue('max-tokens', openaiConfig.max_tokens || 1000);
-        this.setFormValue('temperature', openaiConfig.temperature || 0.7);
-        
-        // 更新温度显示
-        const tempValue = document.getElementById('temperature-value');
-        if (tempValue) {
-            tempValue.textContent = openaiConfig.temperature || 0.7;
-        }
+        // 更新配置组下拉列表
+        const configSelect = document.getElementById('openai-config-select');
+        configSelect.innerHTML = '';
+        openaiConfigs.forEach((config, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.textContent = config.name || `配置 ${index + 1}`;
+            if (index === activeIndex) {
+                option.selected = true;
+            }
+            configSelect.appendChild(option);
+        });
+
+        // 动态填充聊天模型选择框
+        this.populateChatModelSelect();
+
+        // 根据当前选中的配置更新表单
+        this.updateOpenAIFormFields(openaiConfigs[activeIndex] || {});
 
         // 绘画配置
         this.setFormValue('drawing-model', drawingConfig.model || 'dall-e-3');
         this.setFormValue('image-size', drawingConfig.size || '1024x1024');
         this.setFormValue('image-quality', drawingConfig.quality || 'standard');
         this.setFormValue('daily-limit', this.config.features?.drawing?.daily_limit || 10);
+    }
+
+    updateOpenAIFormFields(config) {
+        this.setFormValue('openai-config-name', config.name || '');
+        this.setFormValue('openai-api-key', config.api_key || '');
+        this.setFormValue('openai-base-url', config.api_base_url || 'https://api.openai.com/v1');
+        this.setFormValue('openai-model', config.model || 'gpt-3.5-turbo');
+        this.setFormValue('max-tokens', config.max_tokens || 1000);
+        this.setFormValue('temperature', config.temperature || 0.7);
+        
+        const tempValue = document.getElementById('temperature-value');
+        if (tempValue) {
+            tempValue.textContent = config.temperature || 0.7;
+        }
     }
 
     // 更新欢迎消息表单
@@ -225,6 +247,66 @@ class BotControlPanel {
                 this.updateWelcomePreview();
             });
         }
+
+        // 刷新模型列表
+        const refreshModelsBtn = document.getElementById('refresh-models');
+        if (refreshModelsBtn) {
+            refreshModelsBtn.addEventListener('click', () => {
+                // 直接从表单字段获取当前API密钥值
+                const apiKey = document.getElementById('openai-api-key').value;
+                const baseUrl = document.getElementById('openai-base-url').value;
+                const config = {
+                    api_key: apiKey,
+                    api_base_url: baseUrl
+                };
+                this.loadOpenAIModels('chat', config);
+            });
+        }
+        const refreshImageModelsBtn = document.getElementById('refresh-image-models');
+        if (refreshImageModelsBtn) {
+            refreshImageModelsBtn.addEventListener('click', () => {
+                // 直接从表单字段获取当前API密钥值
+                const apiKey = document.getElementById('openai-api-key').value;
+                const baseUrl = document.getElementById('openai-base-url').value;
+                const config = {
+                    api_key: apiKey,
+                    api_base_url: baseUrl
+                };
+                this.loadOpenAIModels('image', config);
+            });
+        }
+
+        // OpenAI 配置组切换
+        var configSelect = document.getElementById('openai-config-select');
+        if (configSelect) {
+            configSelect.addEventListener('change', (e) => {
+                // 切换到新的配置
+                const newIndex = parseInt(e.target.value);
+                const openaiConfigs = this.config.ai_services.openai_configs || [];
+                const newConfig = openaiConfigs[newIndex] || {};
+
+                // 更新表单字段
+                this.updateOpenAIFormFields(newConfig);
+
+                // 基于新的 API Key 和 Base URL 刷新模型列表
+                const modelApiConfig = {
+                    api_key: newConfig.api_key || '',
+                    api_base_url: newConfig.api_base_url || ''
+                };
+                this.loadOpenAIModels('chat', modelApiConfig);
+                this.loadOpenAIModels('image', modelApiConfig);
+            });
+        }
+
+        // 添加/删除 OpenAI 配置组
+        var addConfigBtn = document.getElementById('add-openai-config');
+        if (addConfigBtn) {
+            addConfigBtn.addEventListener('click', () => this.addOpenAIConfig());
+        }
+        var removeConfigBtn = document.getElementById('remove-openai-config');
+        if (removeConfigBtn) {
+            removeConfigBtn.addEventListener('click', () => this.removeOpenAIConfig());
+        }
     }
 
     // 设置表单处理器
@@ -300,13 +382,12 @@ class BotControlPanel {
         this.setButtonLoading(button, true);
 
         try {
+            // 从表单收集当前配置
+            this.updateCurrentConfigFromForm();
+
             const formData = {
-                openai: {
-                    api_key: document.getElementById('openai-api-key').value,
-                    model: document.getElementById('openai-model').value,
-                    max_tokens: parseInt(document.getElementById('max-tokens').value),
-                    temperature: parseFloat(document.getElementById('temperature').value)
-                },
+                openai_configs: this.config.ai_services.openai_configs,
+                active_openai_config_index: parseInt(document.getElementById('openai-config-select').value),
                 drawing: {
                     model: document.getElementById('drawing-model').value,
                     size: document.getElementById('image-size').value,
@@ -333,6 +414,8 @@ class BotControlPanel {
             if (data.success) {
                 this.showNotification(data.message, 'success');
                 this.updateStatus();
+                // 重新加载配置以确保数据同步
+                this.loadConfig();
             } else {
                 this.showNotification('保存失败: ' + data.error, 'error');
             }
@@ -493,6 +576,144 @@ class BotControlPanel {
             this.updateStatus();
         }, 30000);
     }
+
+    // 加载并更新OpenAI模型列表
+    async loadOpenAIModels(modelType, config) {
+        const refreshBtn = modelType === 'chat' ? document.getElementById('refresh-models') : document.getElementById('refresh-image-models');
+        const icon = refreshBtn.querySelector('i');
+        icon.classList.add('fa-spin');
+        refreshBtn.disabled = true;
+
+        try {
+            const response = await fetch('/api/openai/models', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    api_key: config.api_key,
+                    api_base_url: config.api_base_url
+                })
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                const models = modelType === 'chat' ? data.models.chat : data.models.image;
+                const selectId = modelType === 'chat' ? 'openai-model' : 'drawing-model';
+                const selectElement = document.getElementById(selectId);
+                
+                // 保存当前选中的值
+                const selectedValue = selectElement.value;
+                
+                selectElement.innerHTML = ''; // 清空选项
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = model.name;
+                    selectElement.appendChild(option);
+                });
+
+                // 尝试恢复之前的选中值
+                if (Array.from(selectElement.options).some(opt => opt.value === selectedValue)) {
+                    selectElement.value = selectedValue;
+                }
+
+                this.showNotification(`${modelType === 'chat' ? '聊天' : '绘画'}模型列表已更新`, 'success');
+            } else {
+                this.showNotification(`加载模型列表失败: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            this.showNotification(`网络错误: ${error.message}`, 'error');
+        } finally {
+            icon.classList.remove('fa-spin');
+            refreshBtn.disabled = false;
+        }
+    }
+
+addOpenAIConfig() {
+    if (!this.config.ai_services.openai_configs) {
+        this.config.ai_services.openai_configs = [];
+    }
+    const newConfig = {
+        name: `新配置 ${this.config.ai_services.openai_configs.length + 1}`,
+        api_key: "",
+        api_base_url: "https://api.openai.com/v1",
+        model: "gpt-3.5-turbo",
+        max_tokens: 1000,
+        temperature: 0.7
+    };
+    this.config.ai_services.openai_configs.push(newConfig);
+    const newIndex = this.config.ai_services.openai_configs.length - 1;
+    this.config.ai_services.active_openai_config_index = newIndex;
+    this.updateAIConfigForm();
+    document.getElementById('openai-config-select').value = newIndex;
+}
+
+removeOpenAIConfig() {
+    const configs = this.config.ai_services.openai_configs;
+    if (!configs || configs.length <= 1) {
+        this.showNotification('至少需要保留一个配置组', 'warning');
+        return;
+    }
+    const indexToRemove = parseInt(document.getElementById('openai-config-select').value);
+    configs.splice(indexToRemove, 1);
+    
+    // 更新 active_openai_config_index
+    let newIndex = this.config.ai_services.active_openai_config_index;
+    if (newIndex === indexToRemove) {
+        newIndex = 0;
+    } else if (newIndex > indexToRemove) {
+        newIndex--;
+    }
+    this.config.ai_services.active_openai_config_index = newIndex;
+    
+    this.updateAIConfigForm();
+    document.getElementById('openai-config-select').value = newIndex;
+}
+
+updateCurrentConfigFromForm() {
+    const configs = this.config.ai_services.openai_configs;
+    const currentIndex = parseInt(document.getElementById('openai-config-select').value);
+    if (configs && configs[currentIndex]) {
+        const currentConfig = configs[currentIndex];
+        currentConfig.name = document.getElementById('openai-config-name').value;
+        currentConfig.api_key = document.getElementById('openai-api-key').value;
+        currentConfig.api_base_url = document.getElementById('openai-base-url').value;
+        currentConfig.model = document.getElementById('openai-model').value;
+        currentConfig.max_tokens = parseInt(document.getElementById('max-tokens').value);
+        currentConfig.temperature = parseFloat(document.getElementById('temperature').value);
+    }
+}
+
+// 动态填充聊天模型选择框
+populateChatModelSelect() {
+    const chatModelSelect = document.getElementById('openai-model');
+    if (!chatModelSelect) return;
+
+    // 清空现有选项
+    chatModelSelect.innerHTML = '';
+
+    // 从后端注入的变量获取模型列表
+    const chatModels = window.chat_models || [
+        {id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo"},
+        {id: "gpt-4", name: "GPT-4"},
+        {id: "gpt-4-turbo", name: "GPT-4 Turbo"},
+        {id: "gpt-4o", name: "GPT-4o"},
+        {id: "gpt-4o-mini", name: "GPT-4o Mini"}
+    ];
+
+    // 动态创建选项
+    chatModels.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name;
+        chatModelSelect.appendChild(option);
+    });
+
+    // 设置当前选中的模型
+    const currentModel = window.current_chat_model || 'gpt-3.5-turbo';
+    chatModelSelect.value = currentModel;
+}
 }
 
 // 页面加载完成后初始化

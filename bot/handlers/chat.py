@@ -2,16 +2,21 @@
 AI 对话和搜索功能处理器
 """
 
+from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
-from loguru import logger
-from config.settings import config_manager
+
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
+from config.settings import config_manager
 
 
 async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /chat 命令"""
+    if not update.message or not update.effective_user:
+        logger.warning("chat_command received an update without a message or user.")
+        return
+
     try:
         user = update.effective_user
 
@@ -58,6 +63,10 @@ async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理 /search 命令"""
+    if not update.message or not update.effective_user:
+        logger.warning("search_command received an update without a message or user.")
+        return
+
     try:
         user = update.effective_user
 
@@ -98,15 +107,42 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """处理普通消息（用于群聊记录和可能的AI对话）"""
+    # 确保消息、用户和聊天对象存在，且消息有文本内容
+    if not (
+        update.message
+        and update.message.text
+        and update.effective_user
+        and update.effective_chat
+    ):
+        logger.debug("Ignoring update without message, text, user, or chat.")
+        return
+
     try:
         user = update.effective_user
         chat = update.effective_chat
         message = update.message
 
-        # 如果是群聊，记录消息用于总结功能
+        # 检查是否是对机器人消息的回复
+        is_reply_to_bot = (
+            message.reply_to_message
+            and message.reply_to_message.from_user
+            and message.reply_to_message.from_user.is_bot
+        )
+
+        # 确定是否应该触发AI对话
+        should_trigger_chat = False
+        if chat.type == "private":
+            # 在私聊中，根据配置决定是否自动回复
+            should_trigger_chat = config_manager.get(
+                "features.chat.auto_reply_private", False
+            )
+        elif chat.type in ["group", "supergroup"] and is_reply_to_bot:
+            # 在群聊中，仅当回复机器人时触发
+            should_trigger_chat = True
+
+        # 如果是群聊，无论如何都先记录消息
         if chat.type in ["group", "supergroup"]:
-            if config_manager.is_feature_enabled("auto_summary"):
-                # 存储消息到消息存储器
+            if config_manager.is_feature_enabled("auto_summary") and message.text:
                 message_store.add_message(
                     chat_id=chat.id,
                     user_id=user.id,
@@ -115,28 +151,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     timestamp=message.date,
                 )
 
-        # 如果是私聊且提到了机器人，可以进行AI对话
-        elif chat.type == "private":
-            # 检查是否启用了自动AI对话（可选功能）
-            auto_chat_enabled = config_manager.get(
-                "features.chat.auto_reply_private", False
-            )
+        # 执行AI对话（如果条件满足）
+        if should_trigger_chat and config_manager.is_feature_enabled("chat"):
+            thinking_message = await message.reply_text("🤔 AI 正在思考中...")
+            messages = [{"role": "user", "content": message.text}]
+            ai_response = await ai_services.chat_completion(messages, user.id)
 
-            if auto_chat_enabled and config_manager.is_feature_enabled("chat"):
-                # 发送"正在思考"消息
-                thinking_message = await message.reply_text("🤔 AI 正在思考中...")
-
-                # 构建对话消息
-                messages = [{"role": "user", "content": message.text}]
-
-                # 调用 AI 服务
-                ai_response = await ai_services.chat_completion(messages, user.id)
-
-                if ai_response:
-                    await thinking_message.delete()
-                    await message.reply_text(f"🤖 {ai_response}", parse_mode="Markdown")
-                else:
-                    await thinking_message.delete()
+            if ai_response:
+                await thinking_message.delete()
+                await message.reply_text(f"🤖 {ai_response}", parse_mode="Markdown")
+            else:
+                await thinking_message.edit_text(
+                    "抱歉，AI 服务暂时不可用，请稍后再试。"
+                )
 
         logger.debug(f"处理消息 - 用户: {user.id}, 聊天: {chat.id}, 类型: {chat.type}")
 

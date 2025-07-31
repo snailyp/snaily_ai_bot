@@ -16,10 +16,14 @@
                 小蜗AI助手控制面板
             </a>
             <div class="navbar-nav ms-auto">
-                <span class="navbar-text">
+                <span class="navbar-text me-3">
                     <i class="bi bi-circle-fill text-success"></i>
                     在线
                 </span>
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-box-arrow-right"></i>
+                    登出
+                </a>
             </div>
         </div>
     </nav>
@@ -161,24 +165,52 @@
                             <div class="tab-pane fade show active" id="ai-config" role="tabpanel">
                                 <form id="ai-config-form">
                                     <div class="row">
+                                        <div class="col-12 mb-3">
+                                            <h6 class="mb-3">OpenAI 配置组</h6>
+                                            <div class="input-group">
+                                                <select class="form-select" id="openai-config-select">
+                                                    <!-- 配置组将通过JS动态加载 -->
+                                                </select>
+                                                <button class="btn btn-outline-primary" type="button" id="add-openai-config">
+                                                    <i class="bi bi-plus-lg"></i> 添加
+                                                </button>
+                                                <button class="btn btn-outline-danger" type="button" id="remove-openai-config">
+                                                    <i class="bi bi-trash"></i> 删除
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
                                         <div class="col-md-6">
-                                            <h6 class="mb-3">OpenAI 配置</h6>
+                                            <div class="mb-3">
+                                                <label for="openai-config-name" class="form-label">配置名称</label>
+                                                <input type="text" class="form-control" id="openai-config-name" placeholder="例如：主API">
+                                            </div>
                                             <div class="mb-3">
                                                 <label for="openai-api-key" class="form-label">API Key</label>
                                                 <input type="password" class="form-control" id="openai-api-key" placeholder="sk-...">
                                                 <div class="form-text">OpenAI API 密钥</div>
                                             </div>
                                             <div class="mb-3">
+                                                <label for="openai-base-url" class="form-label">Base URL</label>
+                                                <input type="url" class="form-control" id="openai-base-url" placeholder="https://api.openai.com/v1">
+                                                <div class="form-text">OpenAI API 基础URL，支持第三方代理</div>
+                                            </div>
+                                            <div class="mb-3">
                                                 <label for="openai-model" class="form-label">对话模型</label>
-                                                <select class="form-select" id="openai-model">
-                                                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                                                    <option value="gpt-4">GPT-4</option>
-                                                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                                </select>
+                                                <div class="input-group">
+                                                    <select class="form-select" id="openai-model">
+                                                        <!-- 选项将通过 JavaScript 动态生成 -->
+                                                    </select>
+                                                    <button class="btn btn-outline-secondary" type="button" id="refresh-models" title="刷新模型列表">
+                                                        <i class="bi bi-arrow-clockwise"></i>
+                                                    </button>
+                                                </div>
+                                                <div class="form-text">选择对话使用的模型</div>
                                             </div>
                                             <div class="mb-3">
                                                 <label for="max-tokens" class="form-label">最大 Token 数</label>
-                                                <input type="number" class="form-control" id="max-tokens" min="100" max="4000" value="1000">
+                                                <input type="number" class="form-control" id="max-tokens" min="100" value="1000">
                                             </div>
                                             <div class="mb-3">
                                                 <label for="temperature" class="form-label">创造性 (Temperature)</label>
@@ -194,10 +226,16 @@
                                             <h6 class="mb-3">绘画配置</h6>
                                             <div class="mb-3">
                                                 <label for="drawing-model" class="form-label">绘画模型</label>
-                                                <select class="form-select" id="drawing-model">
-                                                    <option value="dall-e-3">DALL-E 3</option>
-                                                    <option value="dall-e-2">DALL-E 2</option>
-                                                </select>
+                                                <div class="input-group">
+                                                    <select class="form-select" id="drawing-model">
+                                                        <option value="dall-e-3">DALL-E 3</option>
+                                                        <option value="dall-e-2">DALL-E 2</option>
+                                                    </select>
+                                                    <button class="btn btn-outline-secondary" type="button" id="refresh-image-models" title="刷新绘画模型列表">
+                                                        <i class="bi bi-arrow-clockwise"></i>
+                                                    </button>
+                                                </div>
+                                                <div class="form-text">选择图像生成使用的模型</div>
                                             </div>
                                             <div class="mb-3">
                                                 <label for="image-size" class="form-label">图片尺寸</label>
@@ -339,6 +377,11 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 注入后端数据到前端
+        window.chat_models = {{ chat_models | tojson }};
+        window.current_chat_model = {{ current_chat_model | tojson }};
+    </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

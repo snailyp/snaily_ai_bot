@@ -2,13 +2,14 @@
 群聊总结功能处理器
 """
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
-from loguru import logger
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from config.settings import config_manager
+
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
+from config.settings import config_manager
 
 
 async def setup_summary_scheduler(scheduler: AsyncIOScheduler):
@@ -97,22 +98,55 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     try:
         user = update.effective_user
         chat = update.effective_chat
+        message = update.message
+
+        # 基本检查
+        if not user or not chat or not message:
+            return
 
         # 检查功能是否启用
         if not config_manager.is_feature_enabled("auto_summary"):
-            await update.message.reply_text("抱歉，群聊总结功能当前已禁用。")
+            await message.reply_text("抱歉，群聊总结功能当前已禁用。")
             return
 
         # 检查是否在群组中
         if chat.type not in ["group", "supergroup"]:
-            await update.message.reply_text("此命令只能在群组中使用。")
+            await message.reply_text("此命令只能在群组中使用。")
             return
 
         # 检查是否为管理员（可选限制）
         admin_only = config_manager.get("features.auto_summary.admin_only", False)
         if admin_only and not config_manager.is_admin(user.id):
-            await update.message.reply_text("抱歉，只有管理员可以使用此命令。")
+            await message.reply_text("抱歉，只有管理员可以使用此命令。")
             return
+
+        # 检查是否回复了消息（用于单条消息总结）
+        if message.reply_to_message:
+            # 如果回复了消息，对该消息进行总结
+            replied_message = message.reply_to_message
+            if replied_message.text:
+                # 发送"正在总结"消息
+                generating_message = await message.reply_text("📝 正在总结该消息...")
+
+                # 对单条消息进行总结
+                summary = await ai_services.summarize_messages(
+                    [replied_message.text],
+                    "单条消息",
+                )
+
+                if summary:
+                    await generating_message.delete()
+                    await message.reply_text(
+                        f"📝 **消息总结：**\n\n{summary}", parse_mode="Markdown"
+                    )
+                else:
+                    await generating_message.edit_text(
+                        "抱歉，总结该消息时出现问题，请稍后再试。"
+                    )
+                return
+            else:
+                await message.reply_text("请回复一条包含文本内容的消息来使用此功能。")
+                return
 
         # 获取时间范围参数
         hours = 24  # 默认24小时
@@ -120,14 +154,14 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             try:
                 hours = int(context.args[0])
                 if hours <= 0 or hours > 168:  # 最多7天
-                    await update.message.reply_text("时间范围必须在 1-168 小时之间。")
+                    await message.reply_text("时间范围必须在 1-168 小时之间。")
                     return
             except ValueError:
-                await update.message.reply_text("请输入有效的小时数。")
+                await message.reply_text("请输入有效的小时数。")
                 return
 
         # 发送"正在生成总结"消息
-        generating_message = await update.message.reply_text(
+        generating_message = await message.reply_text(
             f"📝 正在生成最近 {hours} 小时的群聊总结..."
         )
 
@@ -164,7 +198,7 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             summary_with_stats += f"• 消息数量: {message_count} 条\n"
             summary_with_stats += f"• 活跃用户: {stats['active_users']} 人"
 
-            await update.message.reply_text(summary_with_stats, parse_mode="Markdown")
+            await message.reply_text(summary_with_stats, parse_mode="Markdown")
         else:
             await generating_message.edit_text("抱歉，生成总结时出现问题，请稍后再试。")
 
@@ -172,7 +206,8 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     except Exception as e:
         logger.error(f"处理 /summary 命令时出错: {e}")
-        await update.message.reply_text("抱歉，处理总结请求时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，处理总结请求时出现错误。")
 
 
 async def summary_stats_command(
@@ -182,10 +217,15 @@ async def summary_stats_command(
     try:
         user = update.effective_user
         chat = update.effective_chat
+        message = update.message
+
+        # 基本检查
+        if not user or not chat or not message:
+            return
 
         # 检查是否在群组中
         if chat.type not in ["group", "supergroup"]:
-            await update.message.reply_text("此命令只能在群组中使用。")
+            await message.reply_text("此命令只能在群组中使用。")
             return
 
         # 获取统计信息
@@ -207,10 +247,11 @@ async def summary_stats_command(
 💡 使用 `/summary` 命令手动生成总结
         """
 
-        await update.message.reply_text(stats_text.strip(), parse_mode="Markdown")
+        await message.reply_text(stats_text.strip(), parse_mode="Markdown")
 
         logger.info(f"用户 {user.id} 查看了群聊 {chat.id} 的统计信息")
 
     except Exception as e:
         logger.error(f"处理 /summary_stats 命令时出错: {e}")
-        await update.message.reply_text("抱歉，获取统计信息时出现错误。")
+        if update.message:
+            await update.message.reply_text("抱歉，获取统计信息时出现错误。")
