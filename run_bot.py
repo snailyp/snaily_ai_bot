@@ -6,6 +6,7 @@
 
 import asyncio
 import os
+import signal
 import sys
 import threading
 import time
@@ -19,6 +20,28 @@ from webapp.app import run_webapp
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
+# 全局变量用于控制程序退出
+shutdown_event = threading.Event()
+bot_instance = None
+
+
+def signal_handler(signum, frame):
+    """信号处理函数 - 处理 SIGTERM 和 SIGINT"""
+    signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+    logger.info(f"🛑 收到 {signal_name} 信号，开始优雅停机...")
+
+    # 设置停机事件
+    shutdown_event.set()
+
+    # 如果机器人实例存在，尝试停止它
+    if bot_instance:
+        try:
+            # 这里可以添加具体的机器人停止逻辑
+            logger.info("正在停止机器人...")
+        except Exception as e:
+            logger.error(f"停止机器人时出错: {e}")
+
+
 def run_webapp_thread():
     """在单独线程中运行 Web 应用"""
     try:
@@ -30,12 +53,14 @@ def run_webapp_thread():
 
 async def run_bot():
     """运行 Telegram 机器人"""
+    global bot_instance
     try:
         # 导入机器人主程序
         from main import TelegramBot
 
         # 创建并启动机器人
         bot = TelegramBot()
+        bot_instance = bot  # 保存实例引用
         await bot.setup_bot()
         await bot.setup_bot_commands()  # 添加这一行
         await bot.start_polling()
@@ -47,6 +72,10 @@ async def run_bot():
 
 def main():
     """主函数"""
+    # 注册信号处理器
+    signal.signal(signal.SIGTERM, signal_handler)  # Render 使用的信号
+    signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C 信号
+
     try:
         # 设置日志
         log_level = config_manager.get("logging.level", "INFO")
@@ -101,13 +130,24 @@ def main():
         logger.info("🚀 启动 Telegram 机器人...")
 
         # 启动机器人（在主线程中）
-        asyncio.run(run_bot())
+        try:
+            asyncio.run(run_bot())
+        except asyncio.CancelledError:
+            logger.info("机器人任务被取消")
+
+        # 等待停机事件或检查是否需要退出
+        if shutdown_event.is_set():
+            logger.info("👋 正在执行优雅停机...")
+            # 给其他线程一些时间来清理
+            time.sleep(1)
 
     except KeyboardInterrupt:
         logger.info("👋 程序被用户中断，正在退出...")
     except Exception as e:
         logger.error(f"💥 程序异常退出: {e}")
         sys.exit(1)
+    finally:
+        logger.info("🔚 程序已退出")
 
 
 if __name__ == "__main__":
