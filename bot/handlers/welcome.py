@@ -76,7 +76,7 @@ async def new_member_handler(
             )
 
             logger.info(
-                f"发送欢迎消息 - 群聊: {chat.id} ({chat.title}), 新成员: {user.id} ({user.username})"
+                f"发送欢迎消息 - 群聊: {chat.id} ({chat.title}), 新成员: {user.id} ({user_mention})"
             )
 
     except Exception as e:

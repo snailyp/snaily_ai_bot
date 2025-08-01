@@ -97,11 +97,11 @@ class ConfigManager:
             if config_data:
                 with self._lock:
                     # 确保 config_data 是字符串类型
-                    if isinstance(config_data, str):
-                        self.config = json.loads(config_data)
-                    else:
-                        # 如果不是字符串，尝试解码
-                        self.config = json.loads(str(config_data))
+                    if isinstance(config_data, bytes):
+                        config_data = config_data.decode("utf-8")
+                    elif not isinstance(config_data, str):
+                        config_data = str(config_data)
+                    self.config = json.loads(config_data)
                 return True
             return False
         except Exception as e:
@@ -140,7 +140,7 @@ class ConfigManager:
                     "description": os.getenv(
                         "BOT_DESCRIPTION",
                         "一个可爱又可靠的AI助手，像小蜗牛一样稳重踏实，支持智能对话、绘画创作、信息搜索和群聊管理",
-                    ),
+                    ).replace("\\n", "\n"),
                 },
                 "telegram": {
                     "bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
@@ -184,7 +184,7 @@ class ConfigManager:
                         "message": os.getenv(
                             "WELCOME_MESSAGE",
                             "欢迎 {user_name} 加入群聊！🎉\n\n我是群助手机器人，可以帮助您：\n• 💬 智能对话 - 使用 /chat 开始对话\n• 🎨 AI绘画 - 使用 /draw 创作图片\n• 🔍 联网搜索 - 使用 /search 搜索信息\n• 📝 群聊总结 - 定时总结群聊内容\n\n输入 /help 查看更多功能！",
-                        ),
+                        ).replace("\\n", "\n"),
                     },
                     "auto_summary": {
                         "enabled": os.getenv("AUTO_SUMMARY_ENABLED", "true").lower()
@@ -198,14 +198,14 @@ class ConfigManager:
                         "summary_prompt": os.getenv(
                             "AUTO_SUMMARY_PROMPT",
                             "请总结以下群聊对话的主要内容和话题：",
-                        ),
+                        ).replace("\\n", "\n"),
                     },
                     "chat": {
                         "enabled": os.getenv("CHAT_ENABLED", "true").lower() == "true",
                         "system_prompt": os.getenv(
                             "CHAT_SYSTEM_PROMPT",
                             "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
-                        ),
+                        ).replace("\\n", "\n"),
                         "history_enabled": os.getenv(
                             "CHAT_HISTORY_ENABLED", "true"
                         ).lower()

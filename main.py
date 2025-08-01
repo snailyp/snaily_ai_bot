@@ -14,6 +14,7 @@ from telegram import (
     BotCommand,
     BotCommandScopeAllChatAdministrators,
     BotCommandScopeDefault,
+    Update,
 )
 from telegram.ext import (
     Application,
@@ -208,7 +209,9 @@ class TelegramBot:
 
             await self.application.start()
             if self.application.updater is not None:
-                await self.application.updater.start_polling()
+                await self.application.updater.start_polling(
+                    allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
+                )
             else:
                 raise RuntimeError("应用程序更新器未初始化")
             logger.info("机器人启动成功，开始监听消息...")
