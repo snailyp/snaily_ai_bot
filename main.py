@@ -161,7 +161,7 @@ class TelegramBot:
             if self.application is None:
                 raise RuntimeError("应用程序未初始化，无法设置命令菜单")
 
-            # 定义管理员命令
+            # 定义管理员专用命令
             admin_commands = [
                 BotCommand("models", "列出可用AI模型"),
                 BotCommand("switch_model", "切换AI模型 (格式: /switch_model <名称>)"),
@@ -179,9 +179,12 @@ class TelegramBot:
                 BotCommand("status", "查看机器人当前状态"),
             ]
 
-            # 设置管理员命令
+            # 创建管理员完整命令列表（管理员命令 + 普通用户命令）
+            admin_full_commands = admin_commands + user_commands
+
+            # 设置管理员命令（包含所有命令）
             await self.application.bot.set_my_commands(
-                admin_commands, scope=BotCommandScopeAllChatAdministrators()
+                admin_full_commands, scope=BotCommandScopeAllChatAdministrators()
             )
 
             # 设置普通用户命令
