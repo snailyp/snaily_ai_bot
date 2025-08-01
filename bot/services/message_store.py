@@ -6,7 +6,7 @@
 import json
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from loguru import logger
@@ -110,7 +110,7 @@ class MessageStore:
                 return []
 
             # 计算时间阈值
-            time_threshold = datetime.now() - timedelta(hours=hours)
+            time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
 
             # 过滤最近的消息
             recent_messages = []
@@ -147,7 +147,7 @@ class MessageStore:
             if chat_id not in self.messages:
                 return 0
 
-            time_threshold = datetime.now() - timedelta(hours=hours)
+            time_threshold = datetime.now(timezone.utc) - timedelta(hours=hours)
             count = 0
 
             for msg in self.messages[chat_id]:
@@ -167,7 +167,7 @@ class MessageStore:
     def clear_old_messages(self, days: int = 30):
         """清理旧消息"""
         try:
-            time_threshold = datetime.now() - timedelta(days=days)
+            time_threshold = datetime.now(timezone.utc) - timedelta(days=days)
 
             for chat_id in list(self.messages.keys()):
                 original_count = len(self.messages[chat_id])
@@ -176,7 +176,8 @@ class MessageStore:
                 self.messages[chat_id] = [
                     msg
                     for msg in self.messages[chat_id]
-                    if datetime.fromisoformat(msg["timestamp"]) >= time_threshold
+                    if datetime.fromisoformat(msg["timestamp"]).astimezone(timezone.utc)
+                    >= time_threshold
                 ]
 
                 cleaned_count = original_count - len(self.messages[chat_id])
@@ -197,7 +198,7 @@ class MessageStore:
             recent_24h = self.get_message_count(chat_id, 24)
 
             # 统计活跃用户（最近24小时）
-            time_threshold = datetime.now() - timedelta(hours=24)
+            time_threshold = datetime.now(timezone.utc) - timedelta(hours=24)
             active_users = set()
 
             for msg in self.messages[chat_id]:
@@ -238,7 +239,7 @@ class MessageStore:
             # 添加时间戳
             message_with_timestamp = {
                 **message,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             dialog_file = self._get_dialog_history_file(chat_id)
@@ -362,7 +363,7 @@ class MessageStore:
                 return
 
             # 计算过期时间阈值
-            cutoff_time = datetime.now() - timedelta(days=retention_days)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(days=retention_days)
             deleted_files = []
             error_files = []
 
@@ -382,7 +383,9 @@ class MessageStore:
 
                     try:
                         # 获取文件的最后修改时间
-                        file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+                        file_mtime = datetime.fromtimestamp(
+                            os.path.getmtime(file_path), timezone.utc
+                        )
 
                         # 如果文件比保留期限更早，则删除
                         if file_mtime < cutoff_time:
