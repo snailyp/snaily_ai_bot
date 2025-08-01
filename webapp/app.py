@@ -432,8 +432,6 @@ def run_webapp():
         port = webapp_config.get("port", 5000)
         debug = webapp_config.get("debug", False)
 
-        if host == "0.0.0.0":
-            host = "localhost"  # 在本地测试时使用 localhost
         logger.info(f"启动 Web 控制面板: http://{host}:{port}")
         app.run(host=host, port=port, debug=debug)
 
