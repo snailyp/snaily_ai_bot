@@ -328,6 +328,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             and message.reply_to_message.from_user.is_bot
         )
 
+        # 检查是否在群聊中被@提及
+        is_mentioned_in_group = False
+        question_text = message.text
+
+        if (
+            chat.type in ["group", "supergroup"]
+            and context.bot.username
+            and message.text
+        ):
+            mention_pattern = f"@{context.bot.username}"
+            if mention_pattern in message.text:
+                is_mentioned_in_group = True
+                # 提取@之后的问题内容
+                # 找到@机器人的位置，提取后面的文本作为问题
+                mention_index = message.text.find(mention_pattern)
+                if mention_index != -1:
+                    # 提取@之后的所有文本，去除首尾空格
+                    question_text = message.text[
+                        mention_index + len(mention_pattern) :
+                    ].strip()
+                    # 如果没有问题内容，使用原始消息去掉@部分
+                    if not question_text:
+                        question_text = message.text.replace(
+                            mention_pattern, ""
+                        ).strip()
+
         # 确定是否应该触发AI对话
         should_trigger_chat = False
         if chat.type == "private":
@@ -335,8 +361,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             should_trigger_chat = config_manager.get(
                 "features.chat.auto_reply_private", False
             )
-        elif chat.type in ["group", "supergroup"] and is_reply_to_bot:
-            # 在群聊中，仅当回复机器人时触发
+        elif chat.type in ["group", "supergroup"] and (
+            is_reply_to_bot or is_mentioned_in_group
+        ):
+            # 在群聊中，当回复机器人或@提及机器人时触发
             should_trigger_chat = True
 
         # 如果是群聊，无论如何都先记录消息
@@ -354,9 +382,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if (
             should_trigger_chat
             and config_manager.is_feature_enabled("chat")
-            and message.text
+            and question_text
         ):
-            await _chat_with_ai(update, message.text)
+            await _chat_with_ai(update, question_text)
 
         logger.debug(f"处理消息 - 用户: {user.id}, 聊天: {chat.id}, 类型: {chat.type}")
 
