@@ -2,11 +2,14 @@
 群聊总结功能处理器
 """
 
+import asyncio
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from bot.handlers.common import delete_messages_after_delay
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
 from config.settings import config_manager
@@ -136,8 +139,12 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
                 if summary:
                     await generating_message.delete()
-                    await message.reply_text(
+                    bot_message = await message.reply_text(
                         f"📝 **消息总结：**\n\n{summary}", parse_mode="Markdown"
+                    )
+                    # 添加消息自动删除功能
+                    asyncio.create_task(
+                        delete_messages_after_delay(message, bot_message)
                     )
                 else:
                     await generating_message.edit_text(
@@ -198,7 +205,11 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             summary_with_stats += f"• 消息数量: {message_count} 条\n"
             summary_with_stats += f"• 活跃用户: {stats['active_users']} 人"
 
-            await message.reply_text(summary_with_stats, parse_mode="Markdown")
+            bot_message = await message.reply_text(
+                summary_with_stats, parse_mode="Markdown"
+            )
+            # 添加消息自动删除功能 - 群聊总结60秒后删除
+            asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
         else:
             await generating_message.edit_text("抱歉，生成总结时出现问题，请稍后再试。")
 

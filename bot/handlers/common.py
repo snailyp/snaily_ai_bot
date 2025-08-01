@@ -3,8 +3,10 @@
 包含 /start, /help, /status 等基础命令
 """
 
+import asyncio
+
 from loguru import logger
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from config.settings import config_manager
@@ -66,7 +68,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 我是一个可爱、稳重的AI助手，像小蜗牛一样踏实可靠，致力于为您提供最好的服务体验！🐌
         """
 
-        await message.reply_text(welcome_text, parse_mode="Markdown")
+        bot_message = await message.reply_text(welcome_text, parse_mode="Markdown")
+
+        # 启动消息自动删除任务
+        asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /start 命令")
 
@@ -151,7 +156,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 需要更多帮助？请联系管理员或查看项目文档。
         """
 
-        await message.reply_text(help_text, parse_mode="Markdown")
+        bot_message = await message.reply_text(help_text, parse_mode="Markdown")
+
+        # 启动消息自动删除任务
+        asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /help 命令")
 
@@ -379,3 +387,36 @@ async def switch_model_command(
         logger.error(f"处理 /switch_model 命令时出错: {e}")
         if update.message:
             await update.message.reply_text("抱歉，处理命令时出现错误。")
+
+
+async def delete_messages_after_delay(
+    user_message: Message, bot_message: Message, delay_seconds: int = 5
+) -> None:
+    """
+    在指定延迟后删除用户消息和机器人消息的辅助函数
+
+    Args:
+        user_message: 用户的原始命令消息对象 (Update.effective_message)
+        bot_message: 机器人发送的回复消息对象 (Message)
+        delay_seconds: 延迟多少秒后执行删除，默认为 5 秒
+    """
+    try:
+        # 等待指定的延迟时间
+        await asyncio.sleep(delay_seconds)
+
+        # 尝试删除机器人消息
+        try:
+            await bot_message.delete()
+            logger.debug(f"成功删除机器人消息 {bot_message.message_id}")
+        except Exception as e:
+            logger.warning(f"删除机器人消息失败: {e}")
+
+        # 尝试删除用户消息
+        try:
+            await user_message.delete()
+            logger.debug(f"成功删除用户消息 {user_message.message_id}")
+        except Exception as e:
+            logger.warning(f"删除用户消息失败: {e}")
+
+    except Exception as e:
+        logger.error(f"执行延迟删除消息时出错: {e}")

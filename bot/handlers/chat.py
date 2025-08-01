@@ -8,6 +8,7 @@ from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from bot.handlers.common import delete_messages_after_delay
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
 from config.settings import config_manager
@@ -407,10 +408,13 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         # 清除对话历史记录
         message_store.clear_dialog_history(chat.id)
 
-        # 发送确认消息
-        await update.effective_message.reply_text(
+        # 发送确认消息并保存返回的 Message 对象
+        sent_message = await update.effective_message.reply_text(
             "✅ 对话历史记录已清除！\n\n" "现在可以开始全新的对话了。"
         )
+
+        # 使用辅助函数延迟删除消息
+        await delete_messages_after_delay(update.effective_message, sent_message)
 
         logger.info(f"用户 {user.id} ({user.username}) 清除了聊天 {chat.id} 的对话历史")
 
