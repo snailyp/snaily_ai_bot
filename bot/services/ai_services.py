@@ -3,7 +3,7 @@ AI 服务模块
 封装对 OpenAI 等 AI API 的调用
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import openai
 from loguru import logger
@@ -16,15 +16,26 @@ class AIServices:
 
     def __init__(self):
         self.openai_client = None
+        self.active_config_cache = None
         self._setup_openai()
 
     def _setup_openai(self):
         """设置 OpenAI 客户端"""
         try:
             active_config = config_manager.get_active_openai_config()
+
+            # 检查配置是否有变化，如果没有变化且客户端已存在，则直接返回
+            if (
+                self.openai_client is not None
+                and self.active_config_cache is not None
+                and self.active_config_cache == active_config
+            ):
+                return
+
             if not active_config:
                 logger.error("没有找到活动的 OpenAI 配置")
                 self.openai_client = None
+                self.active_config_cache = None
                 return
 
             api_key = active_config.get("api_key")
@@ -33,34 +44,77 @@ class AIServices:
             if not api_key:
                 logger.error("活动的 OpenAI 配置中缺少 API Key")
                 self.openai_client = None
+                self.active_config_cache = None
                 return
 
             self.openai_client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+            self.active_config_cache = active_config
             logger.info(
-                f"OpenAI 客户端初始化成功，使用配置: {active_config.get('name', '未命名')}，base_url: {base_url}"
+                f"OpenAI 客户端初始化或更新成功，使用配置: {active_config.get('name', '未命名')}，base_url: {base_url}"
             )
         except Exception as e:
             logger.error(f"OpenAI 客户端初始化失败: {e}")
             self.openai_client = None
+            self.active_config_cache = None
+
+    def reload_config(self):
+        """重新加载配置并重新初始化OpenAI客户端"""
+        try:
+            logger.info("重新加载AI服务配置...")
+            self._setup_openai()
+            logger.info("AI服务配置重新加载完成")
+        except Exception as e:
+            logger.error(f"重新加载AI服务配置失败: {e}")
+
+    async def get_available_models(self) -> List[str]:
+        """
+        获取当前配置可用的模型列表
+
+        Returns:
+            模型ID列表，失败时返回空列表
+        """
+        try:
+            self._setup_openai()
+            if not self.openai_client:
+                logger.error("OpenAI 客户端未初始化，无法获取模型列表")
+                return []
+
+            # 调用 OpenAI API 获取模型列表
+            models_response = await self.openai_client.models.list()
+
+            # 提取模型ID列表
+            model_ids = [model.id for model in models_response.data]
+
+            logger.info(f"成功获取到 {len(model_ids)} 个可用模型")
+            return model_ids
+
+        except openai.AuthenticationError:
+            logger.error("OpenAI API 认证失败，无法获取模型列表")
+            return []
+        except openai.RateLimitError:
+            logger.warning("OpenAI API 速率限制，无法获取模型列表")
+            return []
+        except Exception as e:
+            logger.error(f"获取模型列表失败: {e}")
+            return []
 
     async def chat_completion(
-        self, messages: List[Dict[str, str]], user_id: int = None
+        self, history: List[Dict[str, Any]], user_id: Optional[int] = None
     ) -> Optional[str]:
         """
         AI 对话完成
 
         Args:
-            messages: 对话消息列表，格式 [{"role": "user", "content": "消息内容"}]
+            history: 对话历史列表，格式 [{"role": "user", "content": "消息内容"}]
             user_id: 用户ID，用于日志记录
 
         Returns:
             AI 回复内容，失败时返回 None
         """
         try:
+            self._setup_openai()
             if not self.openai_client:
-                self._setup_openai()
-                if not self.openai_client:
-                    return "抱歉，AI 服务暂时不可用。"
+                return "抱歉，AI 服务暂时不可用。"
 
             # 获取配置
             openai_config = config_manager.get_active_openai_config()
@@ -69,25 +123,30 @@ class AIServices:
 
             model = openai_config.get("model", "gpt-3.5-turbo")
             max_tokens = openai_config.get("max_tokens", 1000)
-            temperature = openai_config.get("temperature", 0.7)
+            if not isinstance(max_tokens, int) or max_tokens <= 0:
+                max_tokens = 1000
+            temperature = openai_config.get("temperature")
+            if temperature is None:
+                temperature = 0.7
 
-            # 添加系统提示
+            # 添加系统提示到历史记录的最前面
             system_prompt = config_manager.get(
                 "features.chat.system_prompt",
                 "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
             )
 
-            full_messages = [{"role": "system", "content": system_prompt}] + messages
+            full_messages = [{"role": "system", "content": system_prompt}] + history
 
             # 调用 OpenAI API
             response = await self.openai_client.chat.completions.create(
                 model=model,
-                messages=full_messages,
+                messages=full_messages,  # type: ignore
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
 
-            reply = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            reply = content.strip() if content is not None else ""
 
             logger.info(
                 f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}"
@@ -99,12 +158,15 @@ class AIServices:
             return "抱歉，当前请求过多，请稍后再试。"
         except openai.AuthenticationError:
             logger.error("OpenAI API 认证失败")
+            self._setup_openai()
             return "抱歉，AI 服务配置有误。"
         except Exception as e:
             logger.error(f"AI 对话失败 - 用户: {user_id}, 错误: {e}")
             return "抱歉，AI 服务暂时出现问题，请稍后再试。"
 
-    async def generate_image(self, prompt: str, user_id: int = None) -> Optional[str]:
+    async def generate_image(
+        self, prompt: str, user_id: Optional[int] = None
+    ) -> Optional[str]:
         """
         AI 图片生成
 
@@ -116,10 +178,9 @@ class AIServices:
             图片URL，失败时返回 None
         """
         try:
+            self._setup_openai()
             if not self.openai_client:
-                self._setup_openai()
-                if not self.openai_client:
-                    return None
+                return None
 
             # 获取配置
             ai_config = config_manager.get_ai_config()
@@ -146,12 +207,15 @@ class AIServices:
             return None
         except openai.AuthenticationError:
             logger.error("OpenAI API 认证失败")
+            self._setup_openai()
             return None
         except Exception as e:
             logger.error(f"AI 图片生成失败 - 用户: {user_id}, 错误: {e}")
             return None
 
-    async def search_web(self, query: str, user_id: int = None) -> Optional[str]:
+    async def search_web(
+        self, query: str, user_id: Optional[int] = None
+    ) -> Optional[str]:
         """
         联网搜索功能
 

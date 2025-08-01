@@ -255,3 +255,54 @@ async def summary_stats_command(
         logger.error(f"处理 /summary_stats 命令时出错: {e}")
         if update.message:
             await update.message.reply_text("抱歉，获取统计信息时出现错误。")
+
+
+async def setup_cleanup_scheduler(scheduler, message_store):
+    """设置历史文件清理定时任务
+
+    Args:
+        scheduler: AsyncIOScheduler 实例
+        message_store: MessageStore 实例
+    """
+    try:
+        # 获取配置
+        cleanup_config = config_manager.get("features.history_cleanup", {})
+        enabled = cleanup_config.get("enabled", True)
+        retention_days = cleanup_config.get("retention_days", 30)
+
+        if not enabled:
+            logger.info("历史文件清理功能已禁用，跳过定时任务设置")
+            return
+
+        # 添加每日定时任务（凌晨3点执行）
+        scheduler.add_job(
+            cleanup_expired_files_job,
+            "cron",
+            hour=3,
+            minute=0,
+            args=[message_store],
+            id="cleanup_expired_files",
+            replace_existing=True,
+        )
+
+        logger.info(
+            f"历史文件清理定时任务已设置 - 启用: {enabled}, 保留天数: {retention_days}, 执行时间: 每日凌晨3点"
+        )
+
+    except Exception as e:
+        logger.error(f"设置历史文件清理定时任务失败: {e}")
+
+
+async def cleanup_expired_files_job(message_store):
+    """清理过期文件的定时任务
+
+    Args:
+        message_store: MessageStore 实例
+    """
+    try:
+        logger.info("开始执行定时清理任务...")
+        message_store.cleanup_expired_files()
+        logger.info("定时清理任务完成")
+
+    except Exception as e:
+        logger.error(f"定时清理任务执行失败: {e}")

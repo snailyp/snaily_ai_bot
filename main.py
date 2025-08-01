@@ -10,6 +10,11 @@ import sys
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
+from telegram import (
+    BotCommand,
+    BotCommandScopeAllChatAdministrators,
+    BotCommandScopeDefault,
+)
 from telegram.ext import (
     Application,
     ChatMemberHandler,
@@ -18,10 +23,22 @@ from telegram.ext import (
     filters,
 )
 
-from bot.handlers.chat import chat_command, handle_message, search_command
-from bot.handlers.common import help_command, start, status
+from bot.handlers.chat import (
+    chat_command,
+    handle_message,
+    reset_command,
+    search_command,
+)
+from bot.handlers.common import (
+    help_command,
+    list_models_command,
+    start,
+    status,
+    switch_model_command,
+)
 from bot.handlers.draw import draw_command, draw_help_command
 from bot.handlers.summary import (
+    setup_cleanup_scheduler,
     setup_summary_scheduler,
     summary_command,
     summary_stats_command,
@@ -31,6 +48,7 @@ from bot.handlers.welcome import (
     set_welcome_command,
     welcome_test_command,
 )
+from bot.services.ai_services import ai_services
 from config.settings import config_manager
 
 # 添加项目根目录到 Python 路径
@@ -49,9 +67,18 @@ class TelegramBot:
         try:
             # 获取配置
             bot_token = config_manager.get_bot_token()
+            if not bot_token:
+                raise ValueError("机器人Token不能为空")
 
             # 创建应用
             self.application = Application.builder().token(bot_token).build()
+
+            # 验证应用是否创建成功
+            if self.application is None:
+                raise RuntimeError("创建Telegram应用失败")
+
+            # 将AI服务实例存储到bot_data中，供命令处理函数访问
+            self.application.bot_data["ai_service"] = ai_services
 
             # 注册命令处理器
             self.register_handlers()
@@ -63,16 +90,26 @@ class TelegramBot:
 
         except Exception as e:
             logger.error(f"机器人设置失败: {e}")
+            # 确保在失败时清理状态
+            self.application = None
             raise
 
     def register_handlers(self):
         """注册消息处理器"""
+        if self.application is None:
+            raise RuntimeError("应用程序未初始化，无法注册处理器")
+
         app = self.application
 
         # 基础命令
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_command))
         app.add_handler(CommandHandler("status", status))
+        app.add_handler(CommandHandler("reset", reset_command))
+
+        # 管理员模型管理命令
+        app.add_handler(CommandHandler("models", list_models_command))
+        app.add_handler(CommandHandler("switch_model", switch_model_command))
 
         # AI 功能命令
         if config_manager.is_feature_enabled("chat"):
@@ -110,16 +147,67 @@ class TelegramBot:
         if config_manager.is_feature_enabled("auto_summary"):
             await setup_summary_scheduler(self.scheduler)
 
+        # 历史文件清理定时任务
+        from bot.services.message_store import message_store
+
+        await setup_cleanup_scheduler(self.scheduler, message_store)
+
         self.scheduler.start()
         logger.info("定时任务设置完成")
+
+    async def setup_bot_commands(self):
+        """设置机器人命令菜单"""
+        try:
+            if self.application is None:
+                raise RuntimeError("应用程序未初始化，无法设置命令菜单")
+
+            # 定义管理员命令
+            admin_commands = [
+                BotCommand("models", "列出可用AI模型"),
+                BotCommand("switch_model", "切换AI模型 (格式: /switch_model <名称>)"),
+            ]
+
+            # 定义普通用户命令
+            user_commands = [
+                BotCommand("start", "欢迎使用并查看帮助"),
+                BotCommand("help", "获取详细帮助信息"),
+                BotCommand("chat", "与 AI 进行一次对话"),
+                BotCommand("search", "使用联网搜索"),
+                BotCommand("draw", "生成一张图片 (格式: /draw <描述>)"),
+                BotCommand("summary", "总结群聊消息"),
+                BotCommand("reset", "重置当前对话历史"),
+                BotCommand("status", "查看机器人当前状态"),
+            ]
+
+            # 设置管理员命令
+            await self.application.bot.set_my_commands(
+                admin_commands, scope=BotCommandScopeAllChatAdministrators()
+            )
+
+            # 设置普通用户命令
+            await self.application.bot.set_my_commands(
+                user_commands, scope=BotCommandScopeDefault()
+            )
+
+            logger.info("机器人命令菜单设置完成")
+
+        except Exception as e:
+            logger.error(f"设置机器人命令菜单失败: {e}")
 
     async def start_polling(self):
         """开始轮询"""
         try:
+            if self.application is None:
+                raise RuntimeError("应用程序未初始化，无法启动轮询")
+
             logger.info("开始启动机器人...")
             await self.application.initialize()
+
             await self.application.start()
-            await self.application.updater.start_polling()
+            if self.application.updater is not None:
+                await self.application.updater.start_polling()
+            else:
+                raise RuntimeError("应用程序更新器未初始化")
             logger.info("机器人启动成功，开始监听消息...")
 
             # 保持运行
@@ -136,13 +224,17 @@ class TelegramBot:
     async def stop(self):
         """停止机器人"""
         try:
-            if self.scheduler.running:
+            if self.scheduler and self.scheduler.running:
                 self.scheduler.shutdown()
 
-            if self.application:
-                await self.application.updater.stop()
-                await self.application.stop()
-                await self.application.shutdown()
+            if self.application is not None:
+                try:
+                    if self.application.updater is not None:
+                        await self.application.updater.stop()
+                    await self.application.stop()
+                    await self.application.shutdown()
+                except Exception as e:
+                    logger.warning(f"停止应用程序时出现警告: {e}")
 
             logger.info("机器人已停止")
         except Exception as e:
@@ -175,6 +267,10 @@ async def main():
     # 创建并启动机器人
     bot = TelegramBot()
     await bot.setup_bot()
+
+    # 设置命令菜单
+    await bot.setup_bot_commands()
+
     await bot.start_polling()
 
 

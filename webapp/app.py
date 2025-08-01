@@ -170,7 +170,13 @@ def update_config():
 
         if not data:
             return jsonify({"success": False, "error": "无效的请求数据"}), 400
-        config_manager.save_config(data)
+
+        # 遍历data中的每个键值对，更新配置
+        for key, value in data.items():
+            config_manager.set(key, value)
+
+        # 保存配置到 .env 文件
+        config_manager.save_config_to_redis()
 
         logger.info("配置已通过 Web 面板更新")
         return jsonify({"success": True, "message": "配置已保存并将在30秒内生效"})
@@ -257,6 +263,12 @@ def update_ai_config():
             drawing_config = data["drawing"]
             for key, value in drawing_config.items():
                 config_manager.set(f"ai_services.drawing.{key}", value)
+
+        # 更新聊天配置
+        if "chat" in data:
+            chat_config = data["chat"]
+            for key, value in chat_config.items():
+                config_manager.set(f"features.chat.{key}", value)
 
         config_manager.save_config_to_redis()
 
@@ -420,6 +432,8 @@ def run_webapp():
         port = webapp_config.get("port", 5000)
         debug = webapp_config.get("debug", False)
 
+        if host == "0.0.0.0":
+            host = "localhost"  # 在本地测试时使用 localhost
         logger.info(f"启动 Web 控制面板: http://{host}:{port}")
         app.run(host=host, port=port, debug=debug)
 

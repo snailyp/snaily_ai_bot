@@ -45,6 +45,9 @@ class BotControlPanel {
         // 更新总结设置表单
         this.updateSummaryConfigForm();
         
+        // 更新历史记录设置表单
+        this.updateHistoryConfigForm();
+        
         // 更新高级设置表单
         this.updateAdvancedConfigForm();
     }
@@ -67,6 +70,7 @@ class BotControlPanel {
         const openaiConfigs = aiConfig.openai_configs || [{}];
         const activeIndex = aiConfig.active_openai_config_index || 0;
         const drawingConfig = aiConfig.drawing || {};
+        const chatConfig = this.config.features?.chat || {};
 
         // 更新配置组下拉列表
         const configSelect = document.getElementById('openai-config-select');
@@ -92,6 +96,13 @@ class BotControlPanel {
         this.setFormValue('image-size', drawingConfig.size || '1024x1024');
         this.setFormValue('image-quality', drawingConfig.quality || 'standard');
         this.setFormValue('daily-limit', this.config.features?.drawing?.daily_limit || 10);
+
+        // 聊天功能配置 - 新增的配置项
+        const autoReplyPrivateCheckbox = document.getElementById('chat-auto-reply-private');
+        if (autoReplyPrivateCheckbox) {
+            autoReplyPrivateCheckbox.checked = chatConfig.auto_reply_private || false;
+        }
+        this.setFormValue('chat-short-message-threshold', chatConfig.short_message_threshold || 50);
     }
 
     updateOpenAIFormFields(config) {
@@ -121,6 +132,17 @@ class BotControlPanel {
         this.setFormValue('summary-interval', summaryConfig.interval_hours || 24);
         this.setFormValue('min-messages', summaryConfig.min_messages || 50);
         this.setFormValue('summary-prompt', summaryConfig.summary_prompt || '');
+    }
+
+    // 更新历史记录设置表单
+    updateHistoryConfigForm() {
+        const historyConfig = this.config.features?.history || {};
+        
+        const cleanupEnabledCheckbox = document.getElementById('history-cleanup-enabled');
+        if (cleanupEnabledCheckbox) {
+            cleanupEnabledCheckbox.checked = historyConfig.cleanup_enabled || false;
+        }
+        this.setFormValue('history-cleanup-retention-days', historyConfig.cleanup_retention_days || 30);
     }
 
     // 更新高级设置表单
@@ -338,6 +360,15 @@ class BotControlPanel {
             });
         }
 
+        // 历史记录设置表单
+        const historyForm = document.getElementById('history-config-form');
+        if (historyForm) {
+            historyForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveHistoryConfig();
+            });
+        }
+
         // 高级设置表单
         const advancedForm = document.getElementById('advanced-config-form');
         if (advancedForm) {
@@ -391,15 +422,16 @@ class BotControlPanel {
                 drawing: {
                     model: document.getElementById('drawing-model').value,
                     size: document.getElementById('image-size').value,
-                    quality: document.getElementById('image-quality').value
+                    quality: document.getElementById('image-quality').value,
+                    daily_limit: parseInt(document.getElementById('daily-limit').value) || 10
+                },
+                chat: {
+                    history_enabled: document.getElementById('chat-history-enabled').checked,
+                    history_max_length: parseInt(document.getElementById('chat-history-max-length').value) || 10,
+                    auto_reply_private: document.getElementById('chat-auto-reply-private').checked,
+                    short_message_threshold: parseInt(document.getElementById('chat-short-message-threshold').value) || 50
                 }
             };
-
-            // 更新每日限制
-            const dailyLimit = parseInt(document.getElementById('daily-limit').value);
-            await this.updateConfig({
-                'features.drawing.daily_limit': dailyLimit
-            });
 
             const response = await fetch('/api/ai_config', {
                 method: 'POST',
@@ -470,6 +502,26 @@ class BotControlPanel {
 
             await this.updateConfig(configData);
             this.showNotification('总结设置已保存', 'success');
+        } catch (error) {
+            this.showNotification('保存失败: ' + error.message, 'error');
+        } finally {
+            this.setButtonLoading(button, false);
+        }
+    }
+
+    // 保存历史记录设置
+    async saveHistoryConfig() {
+        const button = document.querySelector('#history-config-form button[type="submit"]');
+        this.setButtonLoading(button, true);
+
+        try {
+            const configData = {
+                'features.history.cleanup_enabled': document.getElementById('history-cleanup-enabled').checked,
+                'features.history.cleanup_retention_days': parseInt(document.getElementById('history-cleanup-retention-days').value) || 30
+            };
+
+            await this.updateConfig(configData);
+            this.showNotification('历史记录设置已保存', 'success');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
         } finally {

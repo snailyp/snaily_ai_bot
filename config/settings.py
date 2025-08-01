@@ -206,6 +206,20 @@ class ConfigManager:
                             "CHAT_SYSTEM_PROMPT",
                             "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
                         ),
+                        "history_enabled": os.getenv(
+                            "CHAT_HISTORY_ENABLED", "true"
+                        ).lower()
+                        == "true",
+                        "history_max_length": int(
+                            os.getenv("CHAT_HISTORY_MAX_LENGTH", "10")
+                        ),
+                        "auto_reply_private": os.getenv(
+                            "AUTO_REPLY_PRIVATE", "false"
+                        ).lower()
+                        == "true",
+                        "short_message_threshold": int(
+                            os.getenv("SHORT_MESSAGE_THRESHOLD", "1024")
+                        ),
                     },
                     "drawing": {
                         "enabled": os.getenv("DRAWING_ENABLED", "true").lower()
@@ -216,6 +230,15 @@ class ConfigManager:
                         "enabled": os.getenv("SEARCH_FEATURE_ENABLED", "true").lower()
                         == "true",
                         "daily_limit": int(os.getenv("SEARCH_DAILY_LIMIT", "20")),
+                    },
+                    "history": {
+                        "cleanup_enabled": os.getenv(
+                            "HISTORY_CLEANUP_ENABLED", "false"
+                        ).lower()
+                        == "true",
+                        "cleanup_retention_days": int(
+                            os.getenv("HISTORY_CLEANUP_RETENTION_DAYS", "30")
+                        ),
                     },
                 },
                 "webapp": {

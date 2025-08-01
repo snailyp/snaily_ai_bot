@@ -37,6 +37,7 @@ async def run_bot():
         # 创建并启动机器人
         bot = TelegramBot()
         await bot.setup_bot()
+        await bot.setup_bot_commands()  # 添加这一行
         await bot.start_polling()
 
     except Exception as e:

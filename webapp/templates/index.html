@@ -153,6 +153,11 @@
                                 </button>
                             </li>
                             <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history-config" type="button" role="tab">
+                                    <i class="bi bi-clock-history"></i> 历史记录设置
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced-config" type="button" role="tab">
                                     <i class="bi bi-gear"></i> 高级设置
                                 </button>
@@ -220,6 +225,32 @@
                                                     <small id="temperature-value">0.7</small>
                                                     <small>创新 (2)</small>
                                                 </div>
+                                            </div>
+                                            
+                                            <h6 class="mb-3">聊天功能 (Chat)</h6>
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="chat-history-enabled" name="CHAT_HISTORY_ENABLED" value="true" {{ 'checked' if config.features.chat.history_enabled else '' }}>
+                                                    <label class="form-check-label" for="chat-history-enabled">启用对话历史</label>
+                                                </div>
+                                                <small class="form-text text-muted">开启后，机器人将能记住上下文。关闭则为一问一答模式。</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="chat-history-max-length" class="form-label">历史消息长度</label>
+                                                <input type="number" class="form-control" id="chat-history-max-length" name="CHAT_HISTORY_MAX_LENGTH" value="{{ config.features.chat.history_max_length }}">
+                                                <small class="form-text text-muted">机器人能记住的最近对话轮数（1轮=1问1答）。建议值为 5-20。</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="chat-auto-reply-private" name="CHAT_AUTO_REPLY_PRIVATE" value="true" {{ 'checked' if config.features.chat.auto_reply_private else '' }}>
+                                                    <label class="form-check-label" for="chat-auto-reply-private">私聊自动回复</label>
+                                                </div>
+                                                <small class="form-text text-muted">启用后，机器人将自动回复私聊消息。</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="chat-short-message-threshold" class="form-label">短消息阈值</label>
+                                                <input type="number" class="form-control" id="chat-short-message-threshold" name="CHAT_SHORT_MESSAGE_THRESHOLD" min="1" value="{{ config.features.chat.short_message_threshold }}">
+                                                <small class="form-text text-muted">短于此字符数的消息将被视为短消息。</small>
                                             </div>
                                         </div>
                                         <div class="col-md-6">
@@ -317,6 +348,33 @@
                                     </div>
                                     <button type="submit" class="btn btn-primary">
                                         <i class="bi bi-check-lg"></i> 保存总结设置
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- 历史记录设置 -->
+                            <div class="tab-pane fade" id="history-config" role="tabpanel">
+                                <form id="history-config-form">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="history-cleanup-enabled" name="HISTORY_CLEANUP_ENABLED" value="true" {{ 'checked' if config.features.history.cleanup_enabled else '' }}>
+                                                    <label class="form-check-label" for="history-cleanup-enabled">启用历史记录清理</label>
+                                                </div>
+                                                <small class="form-text text-muted">开启后，系统将自动清理过期的历史记录。</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="history-cleanup-retention-days" class="form-label">历史记录保留天数</label>
+                                                <input type="number" class="form-control" id="history-cleanup-retention-days" name="HISTORY_CLEANUP_RETENTION_DAYS" min="1" max="365" value="{{ config.features.history.cleanup_retention_days }}">
+                                                <small class="form-text text-muted">超过此天数的历史记录将被自动清理。</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-lg"></i> 保存历史记录设置
                                     </button>
                                 </form>
                             </div>
