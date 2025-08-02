@@ -24,6 +24,7 @@ from telegram.ext import (
     filters,
 )
 
+from bot.handlers.ask_gb import ask_gb_command
 from bot.handlers.chat import (
     chat_command,
     handle_message,
@@ -119,6 +120,9 @@ class TelegramBot:
         if config_manager.is_feature_enabled("search"):
             app.add_handler(CommandHandler("search", search_command))
 
+        # Ask GB 命令
+        app.add_handler(CommandHandler("ask_gb", ask_gb_command))
+
         if config_manager.is_feature_enabled("drawing"):
             app.add_handler(CommandHandler("draw", draw_command))
             app.add_handler(CommandHandler("draw_help", draw_help_command))
@@ -174,6 +178,7 @@ class TelegramBot:
                 BotCommand("help", "获取详细帮助信息"),
                 BotCommand("chat", "与 AI 进行一次对话"),
                 BotCommand("search", "使用联网搜索"),
+                BotCommand("ask_gb", "询问 GEMINI BALANCE 相关问题"),
                 BotCommand("draw", "生成一张图片 (格式: /draw <描述>)"),
                 BotCommand("summary", "总结群聊消息"),
                 BotCommand("reset", "重置当前对话历史"),

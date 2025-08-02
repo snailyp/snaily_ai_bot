@@ -3,6 +3,7 @@ AI 服务模块
 封装对 OpenAI 等 AI API 的调用
 """
 
+import os
 from typing import Any, Dict, List, Optional
 
 import openai
@@ -315,3 +316,63 @@ class AIServices:
 
 # 全局 AI 服务实例
 ai_services = AIServices()
+
+
+async def get_rag_answer(question: str) -> str:
+    """
+    使用 RAG 模型检索答案。
+    此实现会读取 'docs' 目录中的所有 markdown 文档，
+    将其与用户的问题结合，然后发送给 AI 模型。
+    """
+    logger.info(f"RAG 服务被调用，问题: {question}")
+    try:
+        # 1. 读取所有 docs 下的 markdown 文件
+        docs_path = "docs"
+        all_doc_content = []
+        if os.path.exists(docs_path) and os.path.isdir(docs_path):
+            for filename in os.listdir(docs_path):
+                if filename.endswith(".md"):
+                    filepath = os.path.join(docs_path, filename)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            all_doc_content.append(f.read())
+                    except Exception as e:
+                        logger.warning(f"无法读取文件 {filepath}: {e}")
+
+        if not all_doc_content:
+            logger.warning("RAG: 在 docs 目录中没有找到可用的文档。")
+            return "抱歉，我没有找到任何可以参考的背景知识来回答你的问题。"
+
+        doc_text = "\n\n---\n\n".join(all_doc_content)
+
+        # 2. 构建 prompt
+        rag_prompt = f"""
+        你是一个智能问答机器人。请根据我提供的背景知识来回答问题。
+        如果背景知识中没有相关信息，请明确告知用户你无法根据已知信息回答。
+        请不要编造背景知识中不存在的内容。
+
+        [背景知识]
+        {doc_text}
+        [/背景知识]
+
+        现在，请根据以上背景知识回答我的问题。
+
+        [问题]
+        {question}
+        [/问题]
+        """
+
+        # 3. 调用大模型
+        # 注意：这里我们直接调用了全局实例的 chat_completion 方法
+        messages = [{"role": "user", "content": rag_prompt}]
+        answer = await ai_services.chat_completion(messages)
+
+        if not answer:
+            return "抱歉，AI 服务在处理您的问题时遇到了麻烦。"
+
+        logger.info(f"RAG 服务成功回答问题: {question}")
+        return answer
+
+    except Exception as e:
+        logger.error(f"RAG 服务失败，问题 '{question}': {e}")
+        return "抱歉，知识库问答服务暂时不可用。"
