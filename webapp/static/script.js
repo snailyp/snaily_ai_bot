@@ -329,6 +329,12 @@ class BotControlPanel {
         if (removeConfigBtn) {
             removeConfigBtn.addEventListener('click', () => this.removeOpenAIConfig());
         }
+
+        // Render 重启按钮
+        const restartBtn = document.getElementById('restart-button');
+        if (restartBtn) {
+            restartBtn.addEventListener('click', () => this.restartRenderService());
+        }
     }
 
     // 设置表单处理器
@@ -537,7 +543,8 @@ class BotControlPanel {
         try {
             const configData = {
                 'logging.level': document.getElementById('log-level').value,
-                'webapp.port': parseInt(document.getElementById('webapp-port').value)
+                'webapp.port': parseInt(document.getElementById('webapp-port').value),
+                'webapp.render_webhook_url': document.getElementById('render-webhook-url').value.trim()
             };
 
             await this.updateConfig(configData);
@@ -765,6 +772,42 @@ populateChatModelSelect() {
     // 设置当前选中的模型
     const currentModel = window.current_chat_model || 'gpt-3.5-turbo';
     chatModelSelect.value = currentModel;
+}
+
+// Render 服务重启功能
+async restartRenderService() {
+    const webhookUrl = document.getElementById('render-webhook-url').value.trim();
+    const button = document.getElementById('restart-button');
+    
+    // 检查 URL 是否为空
+    if (!webhookUrl) {
+        this.showNotification('请先配置 Render Webhook URL', 'warning');
+        return;
+    }
+    
+    // 设置按钮加载状态
+    this.setButtonLoading(button, true);
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 重启中...';
+    
+    try {
+        const response = await fetch(webhookUrl, {
+            method: 'GET',
+            mode: 'no-cors' // 避免 CORS 问题
+        });
+        
+        // 由于使用了 no-cors 模式，我们无法检查响应状态
+        // 但如果没有抛出异常，说明请求已发送
+        this.showNotification('重启请求已发送', 'success');
+        
+    } catch (error) {
+        console.error('重启请求失败:', error);
+        this.showNotification('重启失败: ' + error.message, 'error');
+    } finally {
+        // 恢复按钮状态
+        this.setButtonLoading(button, false);
+        button.innerHTML = originalText;
+    }
 }
 }
 

@@ -2,11 +2,27 @@
 新成员欢迎功能处理器
 """
 
+import asyncio
+
 from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from config.settings import config_manager
+
+
+async def delete_message_after_delay(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int
+) -> None:
+    """延时删除消息的后台任务"""
+    try:
+        await asyncio.sleep(delay)
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"已删除欢迎消息 - 群聊: {chat_id}, 消息ID: {message_id}")
+    except Exception as e:
+        logger.warning(
+            f"删除欢迎消息失败 - 群聊: {chat_id}, 消息ID: {message_id}, 错误: {e}"
+        )
 
 
 async def new_member_handler(
@@ -71,13 +87,23 @@ async def new_member_handler(
             )
 
             # 发送欢迎消息
-            await context.bot.send_message(
+            sent_message = await context.bot.send_message(
                 chat_id=chat.id, text=welcome_message, parse_mode="Markdown"
             )
 
             logger.info(
                 f"发送欢迎消息 - 群聊: {chat.id} ({chat.title}), 新成员: {user.id} ({user_mention})"
             )
+
+            # 获取删除延迟配置并创建删除任务
+            delete_delay = welcome_config.get("delete_delay", 60)
+            if delete_delay > 0:
+                asyncio.create_task(
+                    delete_message_after_delay(
+                        context, chat.id, sent_message.message_id, delete_delay
+                    )
+                )
+                logger.info(f"已创建欢迎消息删除任务，将在 {delete_delay} 秒后删除")
 
     except Exception as e:
         logger.error(f"处理新成员欢迎时出错: {e}")

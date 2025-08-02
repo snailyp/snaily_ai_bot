@@ -185,6 +185,9 @@ class ConfigManager:
                             "WELCOME_MESSAGE",
                             "欢迎 {user_name} 加入群聊！🎉\n\n我是群助手机器人，可以帮助您：\n• 💬 智能对话 - 使用 /chat 开始对话\n• 🎨 AI绘画 - 使用 /draw 创作图片\n• 🔍 联网搜索 - 使用 /search 搜索信息\n• 📝 群聊总结 - 定时总结群聊内容\n\n输入 /help 查看更多功能！",
                         ).replace("\\n", "\n"),
+                        "delete_delay": int(
+                            os.getenv("WELCOME_MSG_DELETE_DELAY", "60")
+                        ),
                     },
                     "auto_summary": {
                         "enabled": os.getenv("AUTO_SUMMARY_ENABLED", "true").lower()
@@ -247,6 +250,7 @@ class ConfigManager:
                     "secret_key": self._get_secret_key(),
                     "username": os.getenv("WEB_USERNAME", ""),
                     "password": os.getenv("WEB_PASSWORD", ""),
+                    "render_webhook_url": os.getenv("RENDER_WEBHOOK_URL", ""),
                 },
                 "logging": {
                     "level": os.getenv("LOGGING_LEVEL", "INFO"),

@@ -110,6 +110,9 @@ def index():
             "logging": config_manager.get("logging", {}),
         }
 
+        # 获取 Render Webhook URL
+        render_webhook_url = config_manager.get("webapp.render_webhook_url", "")
+
         # 获取聊天模型列表和当前模型
         ai_config = config_manager.get_ai_config()
         openai_configs = ai_config.get("openai_configs", [{}])
@@ -136,6 +139,7 @@ def index():
             config=config,
             chat_models=chat_models,
             current_chat_model=current_chat_model,
+            render_webhook_url=render_webhook_url,
         )
 
     except Exception as e:

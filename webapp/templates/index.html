@@ -406,6 +406,17 @@
                                                 <input type="number" class="form-control" id="webapp-port" min="1000" max="65535" value="5000">
                                                 <div class="form-text">重启后生效</div>
                                             </div>
+                                            <h6 class="mb-3">Render 部署设置</h6>
+                                            <div class="mb-3">
+                                                <label for="render-webhook-url" class="form-label">Render Webhook URL</label>
+                                                <input type="url" class="form-control" id="render-webhook-url" value="{{ render_webhook_url }}" placeholder="https://api.render.com/deploy/...">
+                                                <div class="form-text">用于重启 Render 服务的 Webhook URL</div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <button type="button" class="btn btn-warning" id="restart-button">
+                                                    <i class="bi bi-arrow-clockwise"></i> 重启
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-warning">
