@@ -56,13 +56,13 @@ async def run_bot():
     global bot_instance
     try:
         # 导入机器人主程序
-        from main import TelegramBot
+        from bot.main import TelegramBot
 
         # 创建并启动机器人
         bot = TelegramBot()
-        bot_instance = bot  # 保存实例引用
+        bot_instance = bot
         await bot.setup_bot()
-        await bot.setup_bot_commands()  # 添加这一行
+        await bot.setup_bot_commands()
         await bot.start_polling()
 
     except Exception as e:
@@ -73,7 +73,7 @@ async def run_bot():
 def main():
     """主函数"""
     # 注册信号处理器
-    signal.signal(signal.SIGTERM, signal_handler)  # Render 使用的信号
+    # signal.signal(signal.SIGTERM, signal_handler)  # Render 使用的信号
     signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C 信号
 
     try:
