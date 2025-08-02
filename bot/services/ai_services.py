@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import openai
 from loguru import logger
+from md2tgmd import escape
 
 from config.settings import config_manager
 
@@ -149,11 +150,15 @@ class AIServices:
             content = response.choices[0].message.content
             reply = content.strip() if content is not None else ""
 
+            # 转换为 Telegram MarkdownV2 安全格式
+            safe_reply = escape(reply)
+
             logger.info(
-                f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}"
+                f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}, 转换后长度: {len(safe_reply)}"
             )
-            logger.info(f"reply: {reply}")
-            return reply
+            logger.info(f"原始回复: {reply}")
+            logger.info(f"转换后回复: {safe_reply}")
+            return safe_reply
 
         except openai.RateLimitError:
             logger.warning(f"OpenAI API 速率限制 - 用户: {user_id}")
@@ -247,7 +252,8 @@ class AIServices:
 
             if result:
                 logger.info(f"搜索完成 - 用户: {user_id}, 查询: {query}")
-                return f"🔍 **搜索结果：{query}**\n\n{result}\n\n💡 *注意：以上信息基于AI知识库，如需最新信息请查看官方来源。*"
+                search_result = f"🔍 **搜索结果：{query}**\n\n{result}\n\n💡 *注意：以上信息基于AI知识库，如需最新信息请查看官方来源。*"
+                return escape(search_result)
 
             return None
 
@@ -306,7 +312,7 @@ class AIServices:
                 logger.info(
                     f"群聊总结完成 - 群聊: {chat_title}, 消息数: {len(messages)}"
                 )
-                return f"{summary}"
+                return escape(summary)
 
             return None
 
@@ -372,7 +378,7 @@ async def get_rag_answer(question: str) -> str:
             return "抱歉，AI 服务在处理您的问题时遇到了麻烦。"
 
         logger.info(f"RAG 服务成功回答问题: {question}")
-        return answer
+        return escape(answer)
 
     except Exception as e:
         logger.error(f"RAG 服务失败，问题 '{question}': {e}")
