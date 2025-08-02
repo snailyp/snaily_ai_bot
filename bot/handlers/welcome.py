@@ -88,7 +88,7 @@ async def new_member_handler(
 
             # 发送欢迎消息
             sent_message = await context.bot.send_message(
-                chat_id=chat.id, text=welcome_message, parse_mode="Markdown"
+                chat_id=chat.id, text=welcome_message, parse_mode="MarkdownV2"
             )
 
             logger.info(
@@ -158,7 +158,7 @@ async def welcome_test_command(
         await message.reply_text(
             f"🧪 **欢迎消息测试**\n\n{test_message}\n\n"
             "💡 这是当前配置的欢迎消息效果预览。",
-            parse_mode="Markdown",
+            parse_mode="MarkdownV2",
         )
 
         logger.info(f"管理员 {user.id} 测试了欢迎消息")
@@ -206,7 +206,7 @@ async def set_welcome_command(
                 f"• `{{chat_title}}` - 群聊标题\n\n"
                 f"**示例：**\n"
                 f"`/set_welcome 欢迎 {{user_mention}} 加入 {{chat_title}}！请阅读群规。`",
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -227,7 +227,7 @@ async def set_welcome_command(
             f"✅ **欢迎消息已更新**\n\n"
             f"**新消息预览：**\n{test_message}\n\n"
             f"配置已保存并立即生效。",
-            parse_mode="Markdown",
+            parse_mode="MarkdownV2",
         )
 
         logger.info(f"管理员 {user.id} 更新了欢迎消息")

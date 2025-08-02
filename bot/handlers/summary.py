@@ -91,7 +91,7 @@ async def generate_and_send_summary(application, chat_id: int, hours: int = 24):
             await application.bot.send_message(
                 chat_id=chat_id,
                 text=final_summary,
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
             )
             logger.info(f"成功发送自动总结到聊天 {chat_id}")
         else:
@@ -145,7 +145,7 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 if summary:
                     await generating_message.delete()
                     bot_message = await message.reply_text(
-                        f"📝 **消息总结：**\n\n{summary}", parse_mode="Markdown"
+                        f"📝 **消息总结：**\n\n{summary}", parse_mode="MarkdownV2"
                     )
                     # 添加消息自动删除功能
                     asyncio.create_task(
@@ -211,7 +211,7 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             summary_with_stats += f"• 活跃用户: {stats['active_users']} 人"
 
             bot_message = await message.reply_text(
-                summary_with_stats, parse_mode="Markdown"
+                summary_with_stats, parse_mode="MarkdownV2"
             )
             # 添加消息自动删除功能 - 群聊总结300秒后删除
             asyncio.create_task(delete_messages_after_delay(message, bot_message, 300))
@@ -263,7 +263,7 @@ async def summary_stats_command(
 💡 使用 `/summary` 命令手动生成总结
         """
 
-        await message.reply_text(stats_text.strip(), parse_mode="Markdown")
+        await message.reply_text(stats_text.strip(), parse_mode="MarkdownV2")
 
         logger.info(f"用户 {user.id} 查看了群聊 {chat.id} 的统计信息")
 

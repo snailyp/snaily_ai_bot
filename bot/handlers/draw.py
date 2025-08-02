@@ -41,7 +41,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "• 可以包含风格、颜色、场景等信息\n"
                 "• 支持中英文描述\n"
                 "• 请避免不当内容",
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
             )
             return
 
@@ -70,7 +70,7 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             caption = f"🎨 **AI 绘画作品**\n\n📝 **描述：** {prompt}\n👤 **创作者：** {user.first_name}"
 
             await message.reply_photo(
-                photo=image_url, caption=caption, parse_mode="Markdown"
+                photo=image_url, caption=caption, parse_mode="MarkdownV2"
             )
 
             logger.info(
@@ -149,7 +149,7 @@ async def draw_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 开始创作您的专属 AI 艺术作品吧！🎭
         """
 
-        await message.reply_text(help_text, parse_mode="Markdown")
+        await message.reply_text(help_text, parse_mode="MarkdownV2")
 
         logger.info(f"用户 {user.id} 查看了绘画帮助")
 

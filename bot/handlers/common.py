@@ -68,7 +68,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 我是一个可爱、稳重的AI助手，像小蜗牛一样踏实可靠，致力于为您提供最好的服务体验！🐌
         """
 
-        bot_message = await message.reply_text(welcome_text, parse_mode="Markdown")
+        bot_message = await message.reply_text(welcome_text, parse_mode="MarkdownV2")
 
         # 启动消息自动删除任务
         asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
@@ -156,7 +156,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 需要更多帮助？请联系管理员或查看项目文档。
         """
 
-        bot_message = await message.reply_text(help_text, parse_mode="Markdown")
+        bot_message = await message.reply_text(help_text, parse_mode="MarkdownV2")
 
         # 启动消息自动删除任务
         asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
@@ -220,7 +220,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"\n⏰ **查询时间：** {message.date.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        await message.reply_text(status_text, parse_mode="Markdown")
+        await message.reply_text(status_text, parse_mode="MarkdownV2")
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /status 命令")
 
@@ -280,7 +280,7 @@ async def list_models_command(
         models_text += f"\n💡 当前使用模型: **{current_model}**"
         models_text += "\n\n使用 `/switch_model <模型名称>` 来切换模型。"
 
-        await message.reply_text(models_text, parse_mode="Markdown")
+        await message.reply_text(models_text, parse_mode="MarkdownV2")
 
         logger.info(f"管理员 {user.id} ({user.username}) 查看了模型列表")
 
@@ -377,7 +377,7 @@ async def switch_model_command(
         success_text += f"🤖 **新模型:** {new_model_name}\n"
         success_text += f"📊 **配置索引:** {active_index}"
 
-        await message.reply_text(success_text, parse_mode="Markdown")
+        await message.reply_text(success_text, parse_mode="MarkdownV2")
 
         logger.info(
             f"管理员 {user.id} ({user.username}) 将AI模型切换到: {new_model_name} (配置索引: {active_index})"

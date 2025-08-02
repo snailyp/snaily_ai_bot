@@ -152,6 +152,7 @@ class AIServices:
             logger.info(
                 f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}"
             )
+            logger.info(f"reply: {reply}")
             return reply
 
         except openai.RateLimitError:

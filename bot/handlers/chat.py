@@ -2,8 +2,6 @@
 AI 对话和搜索功能处理器
 """
 
-import re
-
 from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -11,23 +9,8 @@ from telegram.ext import ContextTypes
 from bot.handlers.common import delete_messages_after_delay
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
+from bot.utils.helpers import escape_markdown_v2
 from config.settings import config_manager
-
-
-def escape_markdown_v2(text: str) -> str:
-    """
-    转义 Telegram MarkdownV2 的特殊字符。
-
-    Args:
-        text: 需要转义的文本。
-
-    Returns:
-        转义后的文本。
-    """
-    # 根据 Telegram Bot API 文档，这些是需要转义的字符：
-    # _ * [ ] ( ) ~ ` > # + - = | { } . !
-    escape_chars = r"_*[]()~`>#+-=|{}.!"
-    return re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
 
 
 async def _send_long_message(
@@ -159,24 +142,8 @@ async def _chat_with_ai(update: Update, text: str) -> None:
             # 删除"正在思考"消息并发送回复
             await thinking_message.delete()
 
-            # 获取短消息阈值配置
-            short_message_threshold = config_manager.get(
-                "features.chat.short_message_threshold", 1024
-            )
-
-            # 根据消息长度选择 parse_mode 和处理方式
-            if len(ai_response) < short_message_threshold:
-                parse_mode = "Markdown"
-                response_content = ai_response
-            else:
-                parse_mode = "MarkdownV2"
-                response_content = escape_markdown_v2(ai_response)
-
-            # 构建完整的回复消息
-            full_response = f"🤖 *AI 回复：*\n\n{response_content}"
-
             # 使用统一的长消息发送函数
-            await _send_long_message(update, full_response, parse_mode=parse_mode)
+            await _send_long_message(update, ai_response, parse_mode="MarkdownV2")
         else:
             await thinking_message.edit_text("抱歉，AI 服务暂时不可用，请稍后再试。")
 
@@ -218,13 +185,13 @@ async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     "💡 *小提示：* 在私聊中，您可以直接发送消息与我对话，无需使用 `/chat` 命令！\n\n"
                     "当然，您也可以继续使用命令格式：\n"
                     "例如：`/chat 你好，请介绍一下自己`",
-                    parse_mode="Markdown",
+                    parse_mode="MarkdownV2",
                 )
             else:
                 await update.effective_message.reply_text(
                     "请在命令后输入您想要对话的内容。\n\n"
                     "例如：`/chat 你好，请介绍一下自己`",
-                    parse_mode="Markdown",
+                    parse_mode="MarkdownV2",
                 )
             return
 
@@ -261,7 +228,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if not context.args:
             await update.effective_message.reply_text(
                 "请在命令后输入您想要搜索的内容。\n\n" "例如：`/search 今天的天气`",
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
             )
             return
 
