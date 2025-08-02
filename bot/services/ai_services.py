@@ -254,7 +254,7 @@ class AIServices:
             if result:
                 logger.info(f"搜索完成 - 用户: {user_id}, 查询: {query}")
                 search_result = f"🔍 **搜索结果：{query}**\n\n{result}\n\n💡 *注意：以上信息基于AI知识库，如需最新信息请查看官方来源。*"
-                return escape(search_result)
+                return search_result
 
             return None
 
@@ -313,7 +313,7 @@ class AIServices:
                 logger.info(
                     f"群聊总结完成 - 群聊: {chat_title}, 消息数: {len(messages)}"
                 )
-                return escape(summary)
+                return summary
 
             return None
 
@@ -382,7 +382,7 @@ async def get_rag_answer(question: str) -> str:
             return "抱歉，AI 服务在处理您的问题时遇到了麻烦。"
 
         logger.info(f"RAG 服务成功回答问题: {question}")
-        return escape(answer)
+        return answer
 
     except Exception as e:
         logger.error(f"RAG 服务失败，问题 '{question}': {e}")
