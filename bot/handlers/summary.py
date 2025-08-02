@@ -15,7 +15,7 @@ from bot.services.message_store import message_store
 from config.settings import config_manager
 
 
-async def setup_summary_scheduler(scheduler: AsyncIOScheduler):
+async def setup_summary_scheduler(application, scheduler: AsyncIOScheduler):
     """设置群聊总结定时任务"""
     try:
         # 获取配置
@@ -27,6 +27,7 @@ async def setup_summary_scheduler(scheduler: AsyncIOScheduler):
             auto_summary_job,
             "interval",
             hours=interval_hours,
+            args=[application],
             id="auto_summary",
             replace_existing=True,
         )
@@ -37,7 +38,7 @@ async def setup_summary_scheduler(scheduler: AsyncIOScheduler):
         logger.error(f"设置群聊总结定时任务失败: {e}")
 
 
-async def auto_summary_job():
+async def auto_summary_job(application):
     """自动总结任务"""
     try:
         # 获取配置
@@ -52,7 +53,9 @@ async def auto_summary_job():
                 message_count = message_store.get_message_count(chat_id, interval_hours)
 
                 if message_count >= min_messages:
-                    await generate_and_send_summary(chat_id, interval_hours)
+                    await generate_and_send_summary(
+                        application, chat_id, interval_hours
+                    )
                 else:
                     logger.debug(
                         f"聊天 {chat_id} 消息数量不足 ({message_count}/{min_messages})，跳过总结"
@@ -67,7 +70,7 @@ async def auto_summary_job():
         logger.error(f"自动总结任务失败: {e}")
 
 
-async def generate_and_send_summary(chat_id: int, hours: int = 24):
+async def generate_and_send_summary(application, chat_id: int, hours: int = 24):
     """生成并发送群聊总结"""
     try:
         # 获取最近的消息
@@ -83,14 +86,16 @@ async def generate_and_send_summary(chat_id: int, hours: int = 24):
         )
 
         if summary:
-            # 这里需要获取 bot 实例来发送消息
-            # 在实际实现中，你可能需要将 bot 实例传递给这个函数
-            # 或者使用全局的 bot 实例
-            logger.info(f"为聊天 {chat_id} 生成了总结")
-            # TODO: 发送总结消息到群聊
-
+            # 发送总结消息
+            final_summary = f"📝 **过去 {hours} 小时自动总结：**\n\n{summary}"
+            await application.bot.send_message(
+                chat_id=chat_id,
+                text=final_summary,
+                parse_mode="Markdown",
+            )
+            logger.info(f"成功发送自动总结到聊天 {chat_id}")
         else:
-            logger.warning(f"为聊天 {chat_id} 生成总结失败")
+            logger.warning(f"为聊天 {chat_id} 生成总结失败，不发送任何消息")
 
     except Exception as e:
         logger.error(f"生成群聊总结时出错 - 聊天: {chat_id}, 错误: {e}")
@@ -144,7 +149,7 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     )
                     # 添加消息自动删除功能
                     asyncio.create_task(
-                        delete_messages_after_delay(message, bot_message)
+                        delete_messages_after_delay(message, bot_message, 300)
                     )
                 else:
                     await generating_message.edit_text(
@@ -208,8 +213,8 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             bot_message = await message.reply_text(
                 summary_with_stats, parse_mode="Markdown"
             )
-            # 添加消息自动删除功能 - 群聊总结60秒后删除
-            asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
+            # 添加消息自动删除功能 - 群聊总结300秒后删除
+            asyncio.create_task(delete_messages_after_delay(message, bot_message, 300))
         else:
             await generating_message.edit_text("抱歉，生成总结时出现问题，请稍后再试。")
 

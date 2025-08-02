@@ -146,7 +146,7 @@ class TelegramBot:
         """设置定时任务"""
         # 群聊总结定时任务
         if config_manager.is_feature_enabled("auto_summary"):
-            await setup_summary_scheduler(self.scheduler)
+            await setup_summary_scheduler(self.application, self.scheduler)
 
         # 历史文件清理定时任务
         from bot.services.message_store import message_store
