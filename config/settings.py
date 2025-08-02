@@ -1,12 +1,28 @@
 import json
 import os
 import secrets
+import sys
 import threading
 from typing import Any, Dict
+
+# 启用 Windows 终端颜色支持
+if sys.platform == "win32":
+    import colorama
+
+    colorama.init()
 
 import redis
 from dotenv import load_dotenv
 from loguru import logger
+
+# 配置 loguru 日志格式
+logger.remove()  # 移除默认处理器
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | <cyan>{name:<25}</cyan> | <level>{message}</level>",
+    level="INFO",
+    colorize=True,
+)
 
 
 class ConfigManager:

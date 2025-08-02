@@ -8,6 +8,12 @@ import asyncio
 import os
 import sys
 
+# 启用 Windows 终端颜色支持
+if sys.platform == "win32":
+    import colorama
+
+    colorama.init()
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from telegram import (
@@ -263,11 +269,16 @@ async def main():
 
     # 配置 loguru
     logger.remove()  # 移除默认处理器
-    logger.add(sys.stderr, level=log_level, format="{time} | {level} | {message}")
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | <cyan>{name:<25}</cyan> | <level>{message}</level>",
+        colorize=True,
+    )
     logger.add(
         log_file,
         level=log_level,
-        format="{time} | {level} | {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {name:<25} | {message}",
         rotation="1 day",
     )
 
