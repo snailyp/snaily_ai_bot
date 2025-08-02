@@ -277,7 +277,7 @@ class AIServices:
             )
 
             # 构建总结请求
-            messages_text = "\n".join(messages[-100:])  # 只取最近100条消息
+            messages_text = "\n".join(messages)
 
             full_prompt = f"""
             {summary_prompt}
@@ -304,7 +304,7 @@ class AIServices:
                 logger.info(
                     f"群聊总结完成 - 群聊: {chat_title}, 消息数: {len(messages)}"
                 )
-                return f"📝 **{chat_title} 群聊总结**\n\n{summary}"
+                return f"{summary}"
 
             return None
 
