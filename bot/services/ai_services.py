@@ -4,6 +4,7 @@ AI 服务模块
 """
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import openai
@@ -353,13 +354,16 @@ async def get_rag_answer(question: str) -> str:
         doc_text = "\n\n---\n\n".join(all_doc_content)
 
         # 2. 构建 prompt
+        # 移除 doc_text 中所有的 markdown 图片链接 ![alt](url)
+        doc_text_no_images = re.sub(r"!\[.*?\]\(.*?\)", "", doc_text)
+
         rag_prompt = f"""
         你是一个智能问答机器人。请根据我提供的背景知识来回答问题。
         如果背景知识中没有相关信息，请明确告知用户你无法根据已知信息回答。
         请不要编造背景知识中不存在的内容。
 
         [背景知识]
-        {doc_text}
+        {doc_text_no_images}
         [/背景知识]
 
         现在，请根据以上背景知识回答我的问题。
