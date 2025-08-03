@@ -1,4 +1,5 @@
 from loguru import logger
+from md2tgmd import escape
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -29,4 +30,4 @@ async def ask_gb_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await thinking_message.delete()
 
     # 发送最终答案
-    await update.message.reply_text(rag_answer)
+    await update.message.reply_text(rag_answer, parse_mode="MarkdownV2")

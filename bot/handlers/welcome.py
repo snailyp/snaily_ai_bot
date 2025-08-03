@@ -5,6 +5,7 @@
 import asyncio
 
 from loguru import logger
+from md2tgmd import escape
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -88,7 +89,7 @@ async def new_member_handler(
 
             # 发送欢迎消息
             sent_message = await context.bot.send_message(
-                chat_id=chat.id, text=welcome_message, parse_mode="MarkdownV2"
+                chat_id=chat.id, text=escape(welcome_message), parse_mode="MarkdownV2"
             )
 
             logger.info(
