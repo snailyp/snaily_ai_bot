@@ -23,17 +23,20 @@
 ## 📦 镜像标签策略
 
 ### 主分支构建
+
 ```bash
 ghcr.io/your-username/snaily_ai_bot:latest
 ghcr.io/your-username/snaily_ai_bot:main
 ```
 
 ### 开发分支构建
+
 ```bash
 ghcr.io/your-username/snaily_ai_bot:develop
 ```
 
 ### 版本标签构建
+
 ```bash
 ghcr.io/your-username/snaily_ai_bot:v1.0.0
 ghcr.io/your-username/snaily_ai_bot:1.0.0
@@ -256,6 +259,7 @@ tar -xzf backup-20240101.tar.gz
 ### 常见问题
 
 1. **容器无法启动**
+
    ```bash
    # 检查日志
    docker logs snaily-bot
@@ -265,6 +269,7 @@ tar -xzf backup-20240101.tar.gz
    ```
 
 2. **Web 控制面板无法访问**
+
    ```bash
    # 检查端口映射
    docker port snaily-bot
@@ -274,6 +279,7 @@ tar -xzf backup-20240101.tar.gz
    ```
 
 3. **机器人无响应**
+
    ```bash
    # 检查 Telegram Bot Token
    docker exec snaily-bot python -c "import os; print('Token:', os.getenv('TELEGRAM_BOT_TOKEN')[:10] + '...')"
@@ -285,6 +291,7 @@ tar -xzf backup-20240101.tar.gz
 ### 性能优化
 
 1. **限制容器资源**
+
    ```bash
    docker run -d \
      --name snaily-bot \
@@ -294,6 +301,7 @@ tar -xzf backup-20240101.tar.gz
    ```
 
 2. **使用 SSD 存储**
+
    ```bash
    # 将数据目录放在 SSD 上
    -v /path/to/ssd/data:/app/data

@@ -152,6 +152,9 @@ class BotControlPanel {
         
         this.setFormValue('log-level', loggingConfig.level || 'INFO');
         this.setFormValue('webapp-port', webappConfig.port || 5000);
+        this.setFormValue('render-webhook-url', webappConfig.render_webhook_url || '');
+        this.setFormValue('koyeb-api-token', webappConfig.koyeb_api_token || '');
+        this.setFormValue('koyeb-service-id', webappConfig.koyeb_service_id || '');
     }
 
     // 设置表单值
@@ -343,6 +346,12 @@ class BotControlPanel {
         const restartBtn = document.getElementById('restart-button');
         if (restartBtn) {
             restartBtn.addEventListener('click', () => this.restartRenderService());
+        }
+
+        // Koyeb 重新部署按钮
+        const koyebRedeployBtn = document.getElementById('koyeb-redeploy-button');
+        if (koyebRedeployBtn) {
+            koyebRedeployBtn.addEventListener('click', () => this.redeployKoyebService());
         }
     }
 
@@ -553,7 +562,9 @@ class BotControlPanel {
             const configData = {
                 'logging.level': document.getElementById('log-level').value,
                 'webapp.port': parseInt(document.getElementById('webapp-port').value),
-                'webapp.render_webhook_url': document.getElementById('render-webhook-url').value.trim()
+                'webapp.render_webhook_url': document.getElementById('render-webhook-url').value.trim(),
+                'webapp.koyeb_api_token': document.getElementById('koyeb-api-token').value.trim(),
+                'webapp.koyeb_service_id': document.getElementById('koyeb-service-id').value.trim()
             };
 
             await this.updateConfig(configData);
@@ -897,6 +908,41 @@ class BotControlPanel {
         } catch (error) {
             console.error('重启请求失败:', error);
             this.showNotification('重启失败: ' + error.message, 'error');
+        } finally {
+            // 恢复按钮状态
+            this.setButtonLoading(button, false);
+            button.innerHTML = originalText;
+        }
+    }
+
+    // Koyeb 服务重新部署功能
+    async redeployKoyebService() {
+        const button = document.getElementById('koyeb-redeploy-button');
+        
+        // 设置按钮加载状态
+        this.setButtonLoading(button, true);
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="bi bi-cloud-upload"></i> 部署中...';
+        
+        try {
+            const response = await fetch('/api/koyeb/redeploy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                this.showNotification('Koyeb服务重新部署已触发', 'success');
+            } else {
+                this.showNotification('重新部署失败: ' + data.error, 'error');
+            }
+            
+        } catch (error) {
+            console.error('Koyeb重新部署请求失败:', error);
+            this.showNotification('重新部署失败: ' + error.message, 'error');
         } finally {
             // 恢复按钮状态
             this.setButtonLoading(button, false);

@@ -17,6 +17,7 @@ from webapp.routes.auth import bp as auth_bp
 from webapp.routes.config_api import bp as config_api_bp
 from webapp.routes.errors import bp as errors_bp
 from webapp.routes.features_api import bp as features_api_bp
+from webapp.routes.koyeb_api import bp as koyeb_api_bp
 from webapp.routes.main import bp as main_bp
 from webapp.routes.status_api import bp as status_api_bp
 
@@ -44,6 +45,7 @@ def create_app():
     app.register_blueprint(config_api_bp)
     app.register_blueprint(features_api_bp)
     app.register_blueprint(ai_api_bp)
+    app.register_blueprint(koyeb_api_bp)
     app.register_blueprint(status_api_bp)
     app.register_blueprint(errors_bp)
 

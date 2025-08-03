@@ -417,6 +417,23 @@
                                                     <i class="bi bi-arrow-clockwise"></i> 重启
                                                 </button>
                                             </div>
+                                            
+                                            <h6 class="mb-3">Koyeb 部署设置</h6>
+                                            <div class="mb-3">
+                                                <label for="koyeb-api-token" class="form-label">Koyeb API Token</label>
+                                                <input type="password" class="form-control" id="koyeb-api-token" placeholder="koyeb_...">
+                                                <div class="form-text">用于访问 Koyeb API 的令牌</div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="koyeb-service-id" class="form-label">Koyeb Service ID</label>
+                                                <input type="text" class="form-control" id="koyeb-service-id" placeholder="service-id-here">
+                                                <div class="form-text">要重新部署的 Koyeb 服务 ID</div>
+                                            </div>
+                                            <div class="mb-3">
+                                                <button type="button" class="btn btn-success" id="koyeb-redeploy-button">
+                                                    <i class="bi bi-cloud-upload"></i> 重新部署 Koyeb 服务
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                     <button type="submit" class="btn btn-warning">

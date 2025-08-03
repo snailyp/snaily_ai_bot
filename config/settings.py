@@ -267,6 +267,8 @@ class ConfigManager:
                     "username": os.getenv("WEB_USERNAME", ""),
                     "password": os.getenv("WEB_PASSWORD", ""),
                     "render_webhook_url": os.getenv("RENDER_WEBHOOK_URL", ""),
+                    "koyeb_api_token": os.getenv("KOYEB_API_TOKEN"),
+                    "koyeb_service_id": os.getenv("KOYEB_SERVICE_ID"),
                 },
                 "logging": {
                     "level": os.getenv("LOGGING_LEVEL", "INFO"),

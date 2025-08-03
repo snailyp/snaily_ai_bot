@@ -44,7 +44,7 @@ def update_config():
         for key, value in data.items():
             config_manager.set(key, value)
 
-        # 保存配置到 .env 文件
+        # 保存配置到Redis
         config_manager.save_config_to_redis()
 
         logger.info("配置已通过 Web 面板更新")
