@@ -1,5 +1,4 @@
 from loguru import logger
-from md2tgmd import escape
 from telegram import Update
 from telegram.ext import ContextTypes
 

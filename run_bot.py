@@ -43,7 +43,7 @@ is_shutting_down = False
 
 async def shutdown(sig: signal.Signals, loop: asyncio.AbstractEventLoop):
     """优雅停机函数"""
-    global is_shutting_down
+    global is_shutting_down, bot_instance
     if is_shutting_down:
         logger.warning("已经在关闭中，请稍候...")
         return
@@ -51,18 +51,32 @@ async def shutdown(sig: signal.Signals, loop: asyncio.AbstractEventLoop):
 
     logger.info(f"🛑 收到 {sig.name} 信号，开始优雅停机...")
 
-    # 1. 取消所有正在运行的任务
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    logger.info(f"准备取消 {len(tasks)} 个后台任务...")
-    for task in tasks:
-        task.cancel()
+    try:
+        # 1. 首先停止机器人实例（如果存在）
+        if bot_instance is not None:
+            logger.info("正在停止机器人实例...")
+            await bot_instance.stop()
+            logger.info("机器人实例已停止")
 
-    # 2. 等待任务完成取消
-    await asyncio.gather(*tasks, return_exceptions=True)
-    logger.info("所有后台任务已取消。")
+        # 2. 取消其他正在运行的任务
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if tasks:
+            logger.info(f"准备取消 {len(tasks)} 个剩余后台任务...")
+            for task in tasks:
+                task.cancel()
 
-    # 3. 停止事件循环
-    loop.stop()
+            # 3. 等待任务完成取消
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("所有后台任务已取消")
+
+        # 4. 停止事件循环
+        logger.info("停止事件循环...")
+        loop.stop()
+
+    except Exception as e:
+        logger.error(f"优雅停机过程中出现错误: {e}")
+        # 即使出错也要停止事件循环
+        loop.stop()
 
 
 def run_webapp_thread():
@@ -88,6 +102,9 @@ async def run_bot():
         await bot.setup_bot_commands()
         await bot.start_polling()
 
+    except asyncio.CancelledError:
+        logger.info("机器人任务被取消，正在优雅关闭...")
+        # 不重新抛出 CancelledError，让它正常结束
     except Exception as e:
         logger.error(f"机器人启动失败: {e}")
         raise

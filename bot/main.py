@@ -69,6 +69,8 @@ class TelegramBot:
     def __init__(self):
         self.application = None
         self.scheduler = AsyncIOScheduler()
+        self._is_stopping = False
+        self._is_stopped = False
 
     async def setup_bot(self):
         """设置机器人"""
@@ -230,6 +232,8 @@ class TelegramBot:
             # 保持运行
             await asyncio.Event().wait()
 
+        except asyncio.CancelledError:
+            logger.info("机器人轮询被取消，正在优雅关闭...")
         except KeyboardInterrupt:
             logger.info("收到停止信号，正在关闭机器人...")
         except Exception as e:
@@ -239,13 +243,26 @@ class TelegramBot:
             await self.stop()
 
     async def stop(self):
-        """停止机器人"""
-        try:
-            if self.scheduler and self.scheduler.running:
-                self.scheduler.shutdown()
+        """停止机器人（幂等操作）"""
+        # 防止重复执行
+        if self._is_stopping or self._is_stopped:
+            logger.debug("机器人已经在停止中或已停止，跳过重复操作")
+            return
 
+        self._is_stopping = True
+
+        try:
+            logger.info("开始停止机器人...")
+
+            # 停止调度器
+            if self.scheduler and self.scheduler.running:
+                logger.debug("停止调度器...")
+                self.scheduler.shutdown(wait=False)
+
+            # 停止 Telegram 应用
             if self.application is not None:
                 try:
+                    logger.debug("停止 Telegram 应用...")
                     if self.application.updater is not None:
                         await self.application.updater.stop()
                     await self.application.stop()
@@ -253,9 +270,14 @@ class TelegramBot:
                 except Exception as e:
                     logger.warning(f"停止应用程序时出现警告: {e}")
 
-            logger.info("机器人已停止")
+            self._is_stopped = True
+            logger.info("机器人已成功停止")
+
         except Exception as e:
             logger.error(f"停止机器人时出错: {e}")
+            raise
+        finally:
+            self._is_stopping = False
 
 
 async def main():
