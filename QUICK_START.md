@@ -31,7 +31,7 @@
 
 ```bash
 # 1. 进入项目目录
-cd render-hub
+cd snaily_ai_bot
 
 # 2. 安装依赖
 pip install -r requirements.txt

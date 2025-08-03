@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  snaily-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_DATE: ${BUILD_DATE}
+    image: ghcr.io/${GITHUB_REPOSITORY:-your-username/snaily_ai_bot}:${TAG:-latest}
+    container_name: snaily-bot
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # 数据持久化
+      - ./data:/app/data
+      # 日志持久化
+      - ./logs:/app/logs
+      # 环境变量文件
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - snaily-network
+
+  # Redis缓存服务（可选）
+  redis:
+    image: redis:7-alpine
+    container_name: snaily-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - snaily-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  snaily-network:
+    driver: bridge

@@ -85,8 +85,8 @@ class BotControlPanel {
             configSelect.appendChild(option);
         });
 
-        // 动态填充聊天模型选择框
-        this.populateChatModelSelect();
+        // 初始化模型选择框（不填充默认模型）
+        this.initializeModelSelects();
 
         // 根据当前选中的配置更新表单
         this.updateOpenAIFormFields(openaiConfigs[activeIndex] || {});
@@ -277,11 +277,17 @@ class BotControlPanel {
                 // 直接从表单字段获取当前API密钥值
                 const apiKey = document.getElementById('openai-api-key').value;
                 const baseUrl = document.getElementById('openai-base-url').value;
+                
+                if (!apiKey.trim()) {
+                    this.showNotification('请先输入 API Key', 'warning');
+                    return;
+                }
+                
                 const config = {
                     api_key: apiKey,
                     api_base_url: baseUrl
                 };
-                this.loadOpenAIModels('chat', config);
+                this.loadOpenAIModels(config);
             });
         }
         const refreshImageModelsBtn = document.getElementById('refresh-image-models');
@@ -290,11 +296,17 @@ class BotControlPanel {
                 // 直接从表单字段获取当前API密钥值
                 const apiKey = document.getElementById('openai-api-key').value;
                 const baseUrl = document.getElementById('openai-base-url').value;
+                
+                if (!apiKey.trim()) {
+                    this.showNotification('请先输入 API Key', 'warning');
+                    return;
+                }
+                
                 const config = {
                     api_key: apiKey,
                     api_base_url: baseUrl
                 };
-                this.loadOpenAIModels('image', config);
+                this.loadOpenAIModels(config);
             });
         }
 
@@ -310,13 +322,10 @@ class BotControlPanel {
                 // 更新表单字段
                 this.updateOpenAIFormFields(newConfig);
 
-                // 基于新的 API Key 和 Base URL 刷新模型列表
-                const modelApiConfig = {
-                    api_key: newConfig.api_key || '',
-                    api_base_url: newConfig.api_base_url || ''
-                };
-                this.loadOpenAIModels('chat', modelApiConfig);
-                this.loadOpenAIModels('image', modelApiConfig);
+                // 更新聊天模型选择框，显示该配置的默认模型
+                this.updateChatModelSelect(newConfig);
+
+                // 绘图模型保持不变，不跟随配置组变化
             });
         }
 
@@ -637,11 +646,17 @@ class BotControlPanel {
     }
 
     // 加载并更新OpenAI模型列表
-    async loadOpenAIModels(modelType, config) {
-        const refreshBtn = modelType === 'chat' ? document.getElementById('refresh-models') : document.getElementById('refresh-image-models');
+    async loadOpenAIModels(config) {
+        const refreshBtn = document.getElementById('refresh-models');
+        const refreshImageBtn = document.getElementById('refresh-image-models');
         const icon = refreshBtn.querySelector('i');
+        const imageIcon = refreshImageBtn.querySelector('i');
+        
+        // 设置加载状态
         icon.classList.add('fa-spin');
+        imageIcon.classList.add('fa-spin');
         refreshBtn.disabled = true;
+        refreshImageBtn.disabled = true;
 
         try {
             const response = await fetch('/api/openai/models', {
@@ -657,27 +672,42 @@ class BotControlPanel {
             const data = await response.json();
 
             if (data.success) {
-                const models = modelType === 'chat' ? data.models.chat : data.models.image;
-                const selectId = modelType === 'chat' ? 'openai-model' : 'drawing-model';
-                const selectElement = document.getElementById(selectId);
+                const models = data.models;
                 
-                // 保存当前选中的值
-                const selectedValue = selectElement.value;
+                // 更新聊天模型选择框
+                const chatSelectElement = document.getElementById('openai-model');
+                const chatSelectedValue = chatSelectElement.value;
+                chatSelectElement.innerHTML = '';
                 
-                selectElement.innerHTML = ''; // 清空选项
+                // 更新绘画模型选择框
+                const drawingSelectElement = document.getElementById('drawing-model');
+                const drawingSelectedValue = drawingSelectElement.value;
+                drawingSelectElement.innerHTML = '';
+                
+                // 填充所有模型到两个选择框
                 models.forEach(model => {
-                    const option = document.createElement('option');
-                    option.value = model.id;
-                    option.textContent = model.name;
-                    selectElement.appendChild(option);
+                    // 聊天模型选择框
+                    const chatOption = document.createElement('option');
+                    chatOption.value = model.id;
+                    chatOption.textContent = model.name;
+                    chatSelectElement.appendChild(chatOption);
+                    
+                    // 绘画模型选择框
+                    const drawingOption = document.createElement('option');
+                    drawingOption.value = model.id;
+                    drawingOption.textContent = model.name;
+                    drawingSelectElement.appendChild(drawingOption);
                 });
 
                 // 尝试恢复之前的选中值
-                if (Array.from(selectElement.options).some(opt => opt.value === selectedValue)) {
-                    selectElement.value = selectedValue;
+                if (Array.from(chatSelectElement.options).some(opt => opt.value === chatSelectedValue)) {
+                    chatSelectElement.value = chatSelectedValue;
+                }
+                if (Array.from(drawingSelectElement.options).some(opt => opt.value === drawingSelectedValue)) {
+                    drawingSelectElement.value = drawingSelectedValue;
                 }
 
-                this.showNotification(`${modelType === 'chat' ? '聊天' : '绘画'}模型列表已更新`, 'success');
+                this.showNotification('模型列表已更新', 'success');
             } else {
                 this.showNotification(`加载模型列表失败: ${data.error}`, 'error');
             }
@@ -685,130 +715,194 @@ class BotControlPanel {
             this.showNotification(`网络错误: ${error.message}`, 'error');
         } finally {
             icon.classList.remove('fa-spin');
+            imageIcon.classList.remove('fa-spin');
             refreshBtn.disabled = false;
+            refreshImageBtn.disabled = false;
         }
     }
 
-addOpenAIConfig() {
-    if (!this.config.ai_services.openai_configs) {
-        this.config.ai_services.openai_configs = [];
+    addOpenAIConfig() {
+        if (!this.config.ai_services.openai_configs) {
+            this.config.ai_services.openai_configs = [];
+        }
+        const newConfig = {
+            name: `新配置 ${this.config.ai_services.openai_configs.length + 1}`,
+            api_key: "",
+            api_base_url: "https://api.openai.com/v1",
+            model: "gpt-3.5-turbo",
+            max_tokens: 1000,
+            temperature: 0.7
+        };
+        this.config.ai_services.openai_configs.push(newConfig);
+        const newIndex = this.config.ai_services.openai_configs.length - 1;
+        this.config.ai_services.active_openai_config_index = newIndex;
+        this.updateAIConfigForm();
+        document.getElementById('openai-config-select').value = newIndex;
     }
-    const newConfig = {
-        name: `新配置 ${this.config.ai_services.openai_configs.length + 1}`,
-        api_key: "",
-        api_base_url: "https://api.openai.com/v1",
-        model: "gpt-3.5-turbo",
-        max_tokens: 1000,
-        temperature: 0.7
-    };
-    this.config.ai_services.openai_configs.push(newConfig);
-    const newIndex = this.config.ai_services.openai_configs.length - 1;
-    this.config.ai_services.active_openai_config_index = newIndex;
-    this.updateAIConfigForm();
-    document.getElementById('openai-config-select').value = newIndex;
-}
 
-removeOpenAIConfig() {
-    const configs = this.config.ai_services.openai_configs;
-    if (!configs || configs.length <= 1) {
-        this.showNotification('至少需要保留一个配置组', 'warning');
-        return;
-    }
-    const indexToRemove = parseInt(document.getElementById('openai-config-select').value);
-    configs.splice(indexToRemove, 1);
-    
-    // 更新 active_openai_config_index
-    let newIndex = this.config.ai_services.active_openai_config_index;
-    if (newIndex === indexToRemove) {
-        newIndex = 0;
-    } else if (newIndex > indexToRemove) {
-        newIndex--;
-    }
-    this.config.ai_services.active_openai_config_index = newIndex;
-    
-    this.updateAIConfigForm();
-    document.getElementById('openai-config-select').value = newIndex;
-}
-
-updateCurrentConfigFromForm() {
-    const configs = this.config.ai_services.openai_configs;
-    const currentIndex = parseInt(document.getElementById('openai-config-select').value);
-    if (configs && configs[currentIndex]) {
-        const currentConfig = configs[currentIndex];
-        currentConfig.name = document.getElementById('openai-config-name').value;
-        currentConfig.api_key = document.getElementById('openai-api-key').value;
-        currentConfig.api_base_url = document.getElementById('openai-base-url').value;
-        currentConfig.model = document.getElementById('openai-model').value;
-        currentConfig.max_tokens = parseInt(document.getElementById('max-tokens').value);
-        currentConfig.temperature = parseFloat(document.getElementById('temperature').value);
-    }
-}
-
-// 动态填充聊天模型选择框
-populateChatModelSelect() {
-    const chatModelSelect = document.getElementById('openai-model');
-    if (!chatModelSelect) return;
-
-    // 清空现有选项
-    chatModelSelect.innerHTML = '';
-
-    // 从后端注入的变量获取模型列表
-    const chatModels = window.chat_models || [
-        {id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo"},
-        {id: "gpt-4", name: "GPT-4"},
-        {id: "gpt-4-turbo", name: "GPT-4 Turbo"},
-        {id: "gpt-4o", name: "GPT-4o"},
-        {id: "gpt-4o-mini", name: "GPT-4o Mini"}
-    ];
-
-    // 动态创建选项
-    chatModels.forEach(model => {
-        const option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = model.name;
-        chatModelSelect.appendChild(option);
-    });
-
-    // 设置当前选中的模型
-    const currentModel = window.current_chat_model || 'gpt-3.5-turbo';
-    chatModelSelect.value = currentModel;
-}
-
-// Render 服务重启功能
-async restartRenderService() {
-    const webhookUrl = document.getElementById('render-webhook-url').value.trim();
-    const button = document.getElementById('restart-button');
-    
-    // 检查 URL 是否为空
-    if (!webhookUrl) {
-        this.showNotification('请先配置 Render Webhook URL', 'warning');
-        return;
-    }
-    
-    // 设置按钮加载状态
-    this.setButtonLoading(button, true);
-    const originalText = button.innerHTML;
-    button.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 重启中...';
-    
-    try {
-        const response = await fetch(webhookUrl, {
-            method: 'GET',
-            mode: 'no-cors' // 避免 CORS 问题
-        });
+    removeOpenAIConfig() {
+        const configs = this.config.ai_services.openai_configs;
+        if (!configs || configs.length <= 1) {
+            this.showNotification('至少需要保留一个配置组', 'warning');
+            return;
+        }
+        const indexToRemove = parseInt(document.getElementById('openai-config-select').value);
+        configs.splice(indexToRemove, 1);
         
-        // 由于使用了 no-cors 模式，我们无法检查响应状态
-        // 但如果没有抛出异常，说明请求已发送
-        this.showNotification('重启请求已发送', 'success');
+        // 更新 active_openai_config_index
+        let newIndex = this.config.ai_services.active_openai_config_index;
+        if (newIndex === indexToRemove) {
+            newIndex = 0;
+        } else if (newIndex > indexToRemove) {
+            newIndex--;
+        }
+        this.config.ai_services.active_openai_config_index = newIndex;
         
-    } catch (error) {
-        console.error('重启请求失败:', error);
-        this.showNotification('重启失败: ' + error.message, 'error');
-    } finally {
-        // 恢复按钮状态
-        this.setButtonLoading(button, false);
-        button.innerHTML = originalText;
+        this.updateAIConfigForm();
+        document.getElementById('openai-config-select').value = newIndex;
     }
-}
+
+    updateCurrentConfigFromForm() {
+        const configs = this.config.ai_services.openai_configs;
+        const currentIndex = parseInt(document.getElementById('openai-config-select').value);
+        if (configs && configs[currentIndex]) {
+            const currentConfig = configs[currentIndex];
+            currentConfig.name = document.getElementById('openai-config-name').value;
+            currentConfig.api_key = document.getElementById('openai-api-key').value;
+            currentConfig.api_base_url = document.getElementById('openai-base-url').value;
+            currentConfig.model = document.getElementById('openai-model').value;
+            currentConfig.max_tokens = parseInt(document.getElementById('max-tokens').value);
+            currentConfig.temperature = parseFloat(document.getElementById('temperature').value);
+        }
+    }
+
+    // 初始化模型选择框（显示已配置的模型或提示信息）
+    initializeModelSelects() {
+        const chatModelSelect = document.getElementById('openai-model');
+        const drawingModelSelect = document.getElementById('drawing-model');
+        
+        if (chatModelSelect) {
+            // 如果有当前聊天模型，显示它
+            const currentChatModel = window.current_chat_model;
+            if (currentChatModel && currentChatModel.trim()) {
+                chatModelSelect.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = currentChatModel;
+                option.textContent = currentChatModel;
+                option.selected = true;
+                chatModelSelect.appendChild(option);
+            } else {
+                chatModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
+            }
+        }
+        
+        if (drawingModelSelect) {
+            // 获取已配置的绘画模型
+            const drawingConfig = this.config?.ai_services?.drawing;
+            const currentDrawingModel = drawingConfig?.model;
+            
+            if (currentDrawingModel && currentDrawingModel.trim()) {
+                drawingModelSelect.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = currentDrawingModel;
+                option.textContent = currentDrawingModel;
+                option.selected = true;
+                drawingModelSelect.appendChild(option);
+            } else {
+                drawingModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
+            }
+        }
+    }
+
+    // 更新聊天模型选择框
+    updateChatModelSelect(config) {
+        const chatModelSelect = document.getElementById('openai-model');
+        if (!chatModelSelect) return;
+        
+        const configModel = config.model;
+        if (configModel && configModel.trim()) {
+            chatModelSelect.innerHTML = '';
+            const option = document.createElement('option');
+            option.value = configModel;
+            option.textContent = configModel;
+            option.selected = true;
+            chatModelSelect.appendChild(option);
+        } else {
+            chatModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
+        }
+    }
+
+    // 清空模型选择框（但保留已配置的模型）
+    clearModelSelects() {
+        const chatModelSelect = document.getElementById('openai-model');
+        const drawingModelSelect = document.getElementById('drawing-model');
+        
+        if (chatModelSelect) {
+            const currentChatModel = window.current_chat_model;
+            if (currentChatModel && currentChatModel.trim()) {
+                chatModelSelect.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = currentChatModel;
+                option.textContent = currentChatModel;
+                option.selected = true;
+                chatModelSelect.appendChild(option);
+            } else {
+                chatModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
+            }
+        }
+        
+        if (drawingModelSelect) {
+            const drawingConfig = this.config?.ai_services?.drawing;
+            const currentDrawingModel = drawingConfig?.model;
+            
+            if (currentDrawingModel && currentDrawingModel.trim()) {
+                drawingModelSelect.innerHTML = '';
+                const option = document.createElement('option');
+                option.value = currentDrawingModel;
+                option.textContent = currentDrawingModel;
+                option.selected = true;
+                drawingModelSelect.appendChild(option);
+            } else {
+                drawingModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
+            }
+        }
+    }
+
+    // Render 服务重启功能
+    async restartRenderService() {
+        const webhookUrl = document.getElementById('render-webhook-url').value.trim();
+        const button = document.getElementById('restart-button');
+        
+        // 检查 URL 是否为空
+        if (!webhookUrl) {
+            this.showNotification('请先配置 Render Webhook URL', 'warning');
+            return;
+        }
+        
+        // 设置按钮加载状态
+        this.setButtonLoading(button, true);
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 重启中...';
+        
+        try {
+            const response = await fetch(webhookUrl, {
+                method: 'GET',
+                mode: 'no-cors' // 避免 CORS 问题
+            });
+            
+            // 由于使用了 no-cors 模式，我们无法检查响应状态
+            // 但如果没有抛出异常，说明请求已发送
+            this.showNotification('重启请求已发送', 'success');
+            
+        } catch (error) {
+            console.error('重启请求失败:', error);
+            this.showNotification('重启失败: ' + error.message, 'error');
+        } finally {
+            // 恢复按钮状态
+            this.setButtonLoading(button, false);
+            button.innerHTML = originalText;
+        }
+    }
 }
 
 // 页面加载完成后初始化

@@ -448,7 +448,6 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // 注入后端数据到前端
-        window.chat_models = {{ chat_models | tojson }};
         window.current_chat_model = {{ current_chat_model | tojson }};
     </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>

@@ -32,7 +32,7 @@
 ```bash
 # 克隆项目
 git clone <your-repo-url>
-cd render-hub
+cd snaily_ai_bot
 
 # 安装依赖
 pip install -r requirements.txt
@@ -176,7 +176,7 @@ python webapp/app.py  # 仅启动 Web 控制面板
 ## 📁 项目结构
 
 ```
-render-hub/
+snaily_ai_bot/
 ├── bot/                    # 机器人核心代码
 │   ├── handlers/          # 命令处理器
 │   │   ├── common.py      # 基础命令

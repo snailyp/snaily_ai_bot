@@ -67,62 +67,31 @@ def get_openai_models():
         # 获取模型列表
         models_response = client.models.list()
 
-        # 过滤出聊天模型和图像生成模型
-        chat_models = []
-        image_models = []
+        # 获取所有模型，不做区分
+        all_models = []
 
         for model in models_response.data:
             model_id = model.id
-            # 图像生成模型（优先检查）
-            if any(
-                keyword in model_id.lower()
-                for keyword in ["dall-e", "dalle", "sd", "stable-diffusion", "image"]
-            ):
-                image_models.append({"id": model_id, "name": model_id, "type": "image"})
-            # 聊天模型
-            elif any(
-                keyword in model_id.lower()
-                for keyword in [
-                    "gpt",
-                    "chat",
-                    "turbo",
-                    "claude",
-                    "llama",
-                    "gemini",
-                    "mistral",
-                    "command",
-                    "instruct",
-                ]
-            ):
-                chat_models.append({"id": model_id, "name": model_id, "type": "chat"})
+            all_models.append({"id": model_id, "name": model_id})
 
-        # 如果API没有返回预期的模型，提供默认模型列表
-        if not chat_models:
-            chat_models = [
-                {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "type": "chat"},
-                {"id": "gpt-4", "name": "GPT-4", "type": "chat"},
-                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "type": "chat"},
-                {"id": "gpt-4o", "name": "GPT-4o", "type": "chat"},
-                {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "type": "chat"},
+        # 如果API没有返回任何模型，提供默认模型列表
+        if not all_models:
+            all_models = [
+                {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
+                {"id": "gpt-4", "name": "GPT-4"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+                {"id": "gpt-4o", "name": "GPT-4o"},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+                {"id": "dall-e-2", "name": "DALL-E 2"},
+                {"id": "dall-e-3", "name": "DALL-E 3"},
             ]
 
-        if not image_models:
-            image_models = [
-                {"id": "dall-e-2", "name": "DALL-E 2", "type": "image"},
-                {"id": "dall-e-3", "name": "DALL-E 3", "type": "image"},
-            ]
-
-        logger.info(
-            f"获取到 {len(chat_models)} 个聊天模型和 {len(image_models)} 个图像模型"
-        )
+        logger.info(f"获取到 {len(all_models)} 个模型")
 
         return jsonify(
             {
                 "success": True,
-                "models": {
-                    "chat": sorted(chat_models, key=lambda x: x["id"]),
-                    "image": sorted(image_models, key=lambda x: x["id"]),
-                },
+                "models": sorted(all_models, key=lambda x: x["id"]),
             }
         )
 

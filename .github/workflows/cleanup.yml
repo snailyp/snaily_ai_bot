@@ -1,0 +1,47 @@
+name: 清理旧版本镜像
+
+on:
+  schedule:
+    # 每周日凌晨2点执行清理
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      keep_count:
+        description: '保留的镜像版本数量'
+        required: false
+        default: '10'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      
+    steps:
+      - name: 清理旧版本镜像
+        uses: actions/delete-package-versions@v4
+        with:
+          package-name: ${{ github.event.repository.name }}
+          package-type: 'container'
+          min-versions-to-keep: ${{ github.event.inputs.keep_count || '10' }}
+          delete-only-untagged-versions: false
+          
+      - name: 生成清理报告
+        run: |
+          echo "## 🧹 镜像清理完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 清理信息" >> $GITHUB_STEP_SUMMARY
+          echo "- **仓库**: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **保留版本数**: ${{ github.event.inputs.keep_count || '10' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **清理时间**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ℹ️ 说明" >> $GITHUB_STEP_SUMMARY
+          echo "- 自动保留最新的 ${{ github.event.inputs.keep_count || '10' }} 个版本" >> $GITHUB_STEP_SUMMARY
+          echo "- 删除了过期的镜像版本以节省存储空间" >> $GITHUB_STEP_SUMMARY
+          echo "- latest 和带语义版本号的标签会被优先保留" >> $GITHUB_STEP_SUMMARY

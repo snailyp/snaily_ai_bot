@@ -28,31 +28,19 @@ def index():
         # 获取 Render Webhook URL
         render_webhook_url = config_manager.get("webapp.render_webhook_url", "")
 
-        # 获取聊天模型列表和当前模型
+        # 获取当前AI配置信息，但不提供默认模型列表
         ai_config = config_manager.get_ai_config()
         openai_configs = ai_config.get("openai_configs", [{}])
         active_index = ai_config.get("active_openai_config_index", 0)
 
-        # 默认的聊天模型列表
-        chat_models = [
-            {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo"},
-            {"id": "gpt-4", "name": "GPT-4"},
-            {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
-            {"id": "gpt-4o", "name": "GPT-4o"},
-            {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
-        ]
-
-        # 获取当前选中的模型
-        current_chat_model = "gpt-3.5-turbo"
+        # 获取当前选中的模型（如果有的话）
+        current_chat_model = ""
         if openai_configs and len(openai_configs) > active_index:
-            current_chat_model = openai_configs[active_index].get(
-                "model", "gpt-3.5-turbo"
-            )
+            current_chat_model = openai_configs[active_index].get("model", "")
 
         return render_template(
             "index.html",
             config=config,
-            chat_models=chat_models,
             current_chat_model=current_chat_model,
             render_webhook_url=render_webhook_url,
         )
