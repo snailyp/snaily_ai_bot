@@ -416,3 +416,85 @@ API_KEYS格式配置错了，一定是列表形式，比如：`["AIxxxxxxxxx"]`,
 ## 21. 失败和无效密钥是怎么判定的，我以为失败就会被判定成无效
 
 无效不是真无效，只是遇到一定次数的报错，可能遇到限额什么的了，未来可能能继续使用的
+
+## 22. gemini-balance mysql版本保存配置出现data too long解决方案
+
+用MySQL数据库的小伙伴，当您在Gemini-Balance（GB）中添加大量Gemini Key时，可能会遇到无法保存的问题。本文提供以下两种解决方案：
+
+**方案一：修改数据库字段类型**
+
+将数据库表 `t_settings` 中 `value` 字段的类型修改为 `longtext`。
+https://linux.do/t/topic/810289/36?u=snaily
+
+**方案二：使用SQLite数据库**
+
+此方案分为无服务器和服务器两种部署方式。
+
+*   **无服务器部署：**
+    请参考[ClawCloud部署GB SQLite版本](https://gb-docs.snaily.top/guide/setup-clawcloud-sqlite.html)的官方文档。
+
+*   **服务器部署：**
+    1.  新建 `.env` 文件，并根据您的配置填入以下内容：
+        ```
+        DATABASE_TYPE=sqlite
+        SQLITE_DATABASE=default_db
+        API_KEYS=["AIzaSyxxxxxxxxxxxxxxxxxxx","AIzaSyxxxxxxxxxxxxxxxxxxx"]
+        ALLOWED_TOKENS=["sk-123456"]
+        AUTH_TOKEN=sk-123456
+        TZ=Asia/Shanghai
+        ```
+
+    2.  在同一目录下创建 `docker-compose.yml` 文件，并填入以下内容：
+        ```yml
+        services:
+          gemini-balance:
+            image: ghcr.io/snailyp/gemini-balance:latest
+            container_name: gemini-balance
+            restart: unless-stopped
+            ports:
+              - "8000:8000"
+            env_file:
+              - .env
+            volumes:
+              - ./data:/app/data
+            healthcheck:
+              test: ["CMD-SHELL", "python -c \"import requests; exit(0) if requests.get('http://localhost:8000/health').status_code == 200 else exit(1)\""]
+              interval: 30s
+              timeout: 5s
+              retries: 3
+              start_period: 10s
+        ```
+
+    3.  在文件所在目录执行 `docker compose up -d` 命令以启动服务。
+
+> 注意：key虽多，但是也很容易失效，这里建议在配置面板将重试次数调高，以及定时删除错误日志的时间缩短，减少磁盘空间的占用。
+
+## 23. WebUI添加密钥不生效且无法持久化，但删除密钥操作正常
+
+添加更新仅仅是前端更新了，如果后端更新则需要点击最下面的保存配置按钮，才会真正刷新配置。
+服务重启读取配置优先级是数据库中的配置 > .env中的数据库配置
+
+## 24. 更新后监控面板不显示有效Key列表和无效key列表
+
+js缓存，强制 ctrl + F5 刷新即可
+
+## 25. 添加密钥数量较大时，保存配置失败: HTTP error! status: 400 附日志
+
+Data too long for column 'value' at row 1
+同 22
+
+## 26.Cline选择OpenAI Compatible，请求发送出去响应码是405
+base url配置gb地址后面需要加上/v1
+
+## 27. NotFoundError: Error code: 404 - {'error': {'code': 'http_error', 'message': 'Not Found'}}
+base_url写错了
+
+## 28. 保存配置失败: HTTP error! status: 400
+数据库没有连上
+
+## 29. Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.
+截断了，上下文太长
+
+## 30. 2.0-flash-image模型的调用出错,后台报错是[unknown] Upload failed: [unknown] Token invalid.
+图床配置有问题
+
