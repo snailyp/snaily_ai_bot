@@ -70,6 +70,7 @@ class TelegramBot:
     def __init__(self):
         self.application = None
         self.scheduler = AsyncIOScheduler()
+        self.shutdown_event = asyncio.Event()  # 新增: 用于优雅停机的事件
         self._is_stopping = False
         self._is_stopped = False
 
@@ -232,29 +233,25 @@ class TelegramBot:
 
         logger.info("开始启动机器人...")
 
-        try:
-            while not self._is_stopping:
-                try:
-                    logger.info("机器人开始监听消息...")
-                    # start_polling 是非阻塞的
-                    await self.application.updater.start_polling(
-                        allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
-                    )
-                    # 使用一个事件来保持协程存活，直到被取消
-                    await asyncio.Event().wait()
-                except (asyncio.CancelledError, KeyboardInterrupt):
-                    logger.info("收到停止信号，将关闭机器人...")
-                    # 中断循环，以执行 finally 中的清理操作
-                    break
-                except Exception as e:
-                    logger.error(f"轮询时发生严重错误: {e}", exc_info=True)
-                    if self.application.updater and self.application.updater.running:
-                        await self.application.updater.stop()
-                    logger.info("将在 10 秒后尝试重启...")
-                    await asyncio.sleep(10)
-        finally:
-            # 确保无论如何都执行停止逻辑
-            await self.stop()
+        while not self._is_stopping:
+            try:
+                logger.info("机器人开始监听消息...")
+                # start_polling 是非阻塞的
+                await self.application.updater.start_polling(
+                    allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
+                )
+                # 使用 shutdown_event 来保持协程存活，直到 stop() 被调用
+                await self.shutdown_event.wait()
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                logger.info("收到停止信号，将关闭机器人...")
+                # 中断循环，以执行 finally 中的清理操作
+                break
+            except Exception as e:
+                logger.error(f"轮询时发生严重错误: {e}", exc_info=True)
+                if self.application.updater and self.application.updater.running:
+                    await self.application.updater.stop()
+                logger.info("将在 10 秒后尝试重启...")
+                await asyncio.sleep(10)
 
     async def stop(self):
         """停止机器人（幂等操作）"""
@@ -267,6 +264,7 @@ class TelegramBot:
 
         try:
             logger.info("开始停止机器人...")
+            self.shutdown_event.set()  # 触发停机事件，让 start_polling 退出
 
             # 停止调度器
             if self.scheduler and self.scheduler.running:
