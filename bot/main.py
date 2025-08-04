@@ -24,6 +24,7 @@ from telegram import (
 )
 from telegram.ext import (
     Application,
+    CallbackContext,
     ChatMemberHandler,
     CommandHandler,
     MessageHandler,
@@ -152,6 +153,9 @@ class TelegramBot:
         # 普通消息处理（用于群聊记录和AI对话）
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+        # 注册全局错误处理器，作为内部防线
+        app.add_error_handler(self.on_error)
+
         logger.info("消息处理器注册完成")
 
     async def setup_schedulers(self):
@@ -211,35 +215,45 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"设置机器人命令菜单失败: {e}")
 
+    async def on_error(self, update: object, context: CallbackContext):
+        """处理更新时发生的错误"""
+        # 记录完整的错误信息，包括堆栈跟踪
+        logger.error("处理更新时发生异常", exc_info=context.error)
+
     async def start_polling(self):
-        """开始轮询"""
+        """开始轮询，并实现自动重启"""
+        if self.application is None:
+            raise RuntimeError("应用程序未初始化，无法启动轮询")
+
+        await self.application.initialize()
+        await self.application.start()
+        if self.application.updater is None:
+            raise RuntimeError("应用程序更新器未初始化")
+
+        logger.info("开始启动机器人...")
+
         try:
-            if self.application is None:
-                raise RuntimeError("应用程序未初始化，无法启动轮询")
-
-            logger.info("开始启动机器人...")
-            await self.application.initialize()
-
-            await self.application.start()
-            if self.application.updater is not None:
-                await self.application.updater.start_polling(
-                    allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
-                )
-            else:
-                raise RuntimeError("应用程序更新器未初始化")
-            logger.info("机器人启动成功，开始监听消息...")
-
-            # 保持运行
-            await asyncio.Event().wait()
-
-        except asyncio.CancelledError:
-            logger.info("机器人轮询被取消，正在优雅关闭...")
-        except KeyboardInterrupt:
-            logger.info("收到停止信号，正在关闭机器人...")
-        except Exception as e:
-            logger.error(f"机器人运行出错: {e}")
-            raise
+            while not self._is_stopping:
+                try:
+                    logger.info("机器人开始监听消息...")
+                    # start_polling 是非阻塞的
+                    await self.application.updater.start_polling(
+                        allowed_updates=[Update.MESSAGE, Update.CHAT_MEMBER]
+                    )
+                    # 使用一个事件来保持协程存活，直到被取消
+                    await asyncio.Event().wait()
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    logger.info("收到停止信号，将关闭机器人...")
+                    # 中断循环，以执行 finally 中的清理操作
+                    break
+                except Exception as e:
+                    logger.error(f"轮询时发生严重错误: {e}", exc_info=True)
+                    if self.application.updater and self.application.updater.running:
+                        await self.application.updater.stop()
+                    logger.info("将在 10 秒后尝试重启...")
+                    await asyncio.sleep(10)
         finally:
+            # 确保无论如何都执行停止逻辑
             await self.stop()
 
     async def stop(self):
