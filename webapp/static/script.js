@@ -45,6 +45,9 @@ class BotControlPanel {
         // 更新总结设置表单
         this.updateSummaryConfigForm();
         
+        // 更新热点推送设置表单
+        this.updateHotspotPushConfigForm();
+        
         // 更新历史记录设置表单
         this.updateHistoryConfigForm();
         
@@ -132,6 +135,17 @@ class BotControlPanel {
         this.setFormValue('summary-interval', summaryConfig.interval_hours || 24);
         this.setFormValue('min-messages', summaryConfig.min_messages || 50);
         this.setFormValue('summary-prompt', summaryConfig.summary_prompt || '');
+    }
+
+    // 更新热点推送设置表单
+    updateHotspotPushConfigForm() {
+        const hotspotConfig = this.config.features?.hotspot_push || {};
+        const enabledCheckbox = document.getElementById('hotspot-push-enabled');
+        if (enabledCheckbox) {
+            enabledCheckbox.checked = hotspotConfig.enabled || false;
+        }
+        this.setFormValue('hotspot-push-interval', hotspotConfig.push_interval_minutes || 60);
+        this.setFormValue('hotspot-push-chat-id', hotspotConfig.telegram_push_chat_id || '');
     }
 
     // 更新历史记录设置表单
@@ -384,6 +398,15 @@ class BotControlPanel {
             });
         }
 
+        // 热点推送设置表单
+        const hotspotForm = document.getElementById('hotspot-config-form');
+        if (hotspotForm) {
+            hotspotForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveHotspotPushConfig();
+            });
+        }
+
         // 历史记录设置表单
         const historyForm = document.getElementById('history-config-form');
         if (historyForm) {
@@ -526,6 +549,32 @@ class BotControlPanel {
 
             await this.updateConfig(configData);
             this.showNotification('总结设置已保存', 'success');
+        } catch (error) {
+            this.showNotification('保存失败: ' + error.message, 'error');
+        } finally {
+            this.setButtonLoading(button, false);
+        }
+    }
+
+    // 保存热点推送设置
+    async saveHotspotPushConfig() {
+        const button = document.querySelector('#hotspot-config-form button[type="submit"]');
+        this.setButtonLoading(button, true);
+
+        try {
+            const sources = document.getElementById('hotspot-sources').value.split(',').map(s => s.trim()).filter(Boolean);
+            const keywords = document.getElementById('hotspot-keywords').value.split(',').map(s => s.trim()).filter(Boolean);
+
+            const configData = {
+                'features.hotspot_push.enabled': document.getElementById('hotspot-push-enabled').checked,
+                'features.hotspot_push.push_schedule': document.getElementById('hotspot-push-schedule').value,
+                'features.hotspot_push.telegram_push_chat_id': document.getElementById('hotspot-push-chat-id').value.trim(),
+                'features.hotspot_push.sources': sources,
+                'features.hotspot_push.keywords': keywords
+            };
+
+            await this.updateConfig(configData);
+            this.showNotification('热点推送设置已保存', 'success');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
         } finally {

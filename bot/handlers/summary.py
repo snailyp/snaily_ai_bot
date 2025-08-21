@@ -5,6 +5,7 @@
 import asyncio
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.jobstores.base import JobLookupError
 from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -18,9 +19,17 @@ from config.settings import config_manager
 async def setup_summary_scheduler(application, scheduler: AsyncIOScheduler):
     """设置群聊总结定时任务"""
     try:
+        job_id = "auto_summary"
         # 获取配置
         summary_config = config_manager.get("features.auto_summary", {})
         interval_hours = summary_config.get("interval_hours", 24)
+
+        # 如已存在同名任务，先移除
+        try:
+            scheduler.remove_job(job_id)
+            logger.info(f"检测到已存在的任务 {job_id}，已先移除准备重建")
+        except JobLookupError:
+            logger.debug(f"未发现现有任务 {job_id}，将直接创建")
 
         # 添加定时任务
         scheduler.add_job(
@@ -28,11 +37,10 @@ async def setup_summary_scheduler(application, scheduler: AsyncIOScheduler):
             "interval",
             hours=interval_hours,
             args=[application],
-            id="auto_summary",
-            replace_existing=True,
+            id=job_id,
         )
 
-        logger.info(f"群聊总结定时任务已设置，间隔: {interval_hours} 小时")
+        logger.info(f"群聊总结定时任务已设置，间隔: {interval_hours} 小时 (job_id={job_id})")
 
     except Exception as e:
         logger.error(f"设置群聊总结定时任务失败: {e}")
@@ -281,6 +289,7 @@ async def setup_cleanup_scheduler(scheduler, message_store):
         message_store: MessageStore 实例
     """
     try:
+        job_id = "cleanup_expired_files"
         # 获取配置
         cleanup_config = config_manager.get("features.history_cleanup", {})
         enabled = cleanup_config.get("enabled", True)
@@ -288,7 +297,20 @@ async def setup_cleanup_scheduler(scheduler, message_store):
 
         if not enabled:
             logger.info("历史文件清理功能已禁用，跳过定时任务设置")
+            # 若存在旧任务则移除
+            try:
+                scheduler.remove_job(job_id)
+                logger.info(f"已移除历史文件清理旧任务 {job_id}（功能已禁用）")
+            except JobLookupError:
+                logger.debug(f"功能禁用但未发现旧任务 {job_id}")
             return
+
+        # 如已存在同名任务，先移除
+        try:
+            scheduler.remove_job(job_id)
+            logger.info(f"检测到已存在的任务 {job_id}，已先移除准备重建")
+        except JobLookupError:
+            logger.debug(f"未发现现有任务 {job_id}，将直接创建")
 
         # 添加每日定时任务（凌晨3点执行）
         scheduler.add_job(
@@ -297,12 +319,11 @@ async def setup_cleanup_scheduler(scheduler, message_store):
             hour=3,
             minute=0,
             args=[message_store],
-            id="cleanup_expired_files",
-            replace_existing=True,
+            id=job_id,
         )
 
         logger.info(
-            f"历史文件清理定时任务已设置 - 启用: {enabled}, 保留天数: {retention_days}, 执行时间: 每日凌晨3点"
+            f"历史文件清理定时任务已设置 - 启用: {enabled}, 保留天数: {retention_days}, 执行时间: 每日凌晨3点 (job_id={job_id})"
         )
 
     except Exception as e:

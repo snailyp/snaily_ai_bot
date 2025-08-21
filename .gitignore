@@ -44,3 +44,4 @@ logs/
 .DS_Store
 Thumbs.db
 data/
+tests/

@@ -11,6 +11,8 @@ Flask-CORS==4.0.0
 # 配置和数据处理
 python-dotenv==1.0.0
 requests==2.31.0
+PyYAML==6.0.1
+pytz==2023.3.post1
 
 # 异步支持
 asyncio==3.4.3

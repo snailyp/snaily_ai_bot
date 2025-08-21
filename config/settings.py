@@ -259,6 +259,27 @@ class ConfigManager:
                             os.getenv("HISTORY_CLEANUP_RETENTION_DAYS", "30")
                         ),
                     },
+                    "hotspot_push": {
+                        "enabled": os.getenv("HOTSPOT_PUSH_ENABLED", "true").lower()
+                        == "true",
+                        "push_schedule": os.getenv("HOTSPOT_PUSH_SCHEDULE", "09:00"),
+                        "sources": [
+                            x.strip()
+                            for x in os.getenv(
+                                "HOTSPOT_SOURCES",
+                                "github-trending-today,producthunt",
+                            ).split(",")
+                            if x.strip()
+                        ],
+                        "keywords": [
+                            x.strip()
+                            for x in os.getenv("HOTSPOT_KEYWORDS", "").split(",")
+                            if x.strip()
+                        ],
+                        "telegram_push_chat_id": os.getenv(
+                            "TELEGRAM_PUSH_CHAT_ID", "-4656523535"
+                        ),
+                    },
                 },
                 "webapp": {
                     "host": os.getenv("WEBAPP_HOST", "0.0.0.0"),

@@ -9,18 +9,20 @@ import os
 import signal
 import sys
 import threading
-import time
 
 # 启用 Windows 终端颜色支持
-if sys.platform == "win32":
+try:
     import colorama
 
     colorama.init()
+except ImportError:
+    # colorama 不可用时静默忽略
+    pass
 
 from loguru import logger
 
 from config.settings import config_manager
-from webapp.app import run_webapp
+from webapp.app import create_app, run_webapp
 
 # 配置 loguru 日志格式
 logger.remove()  # 移除默认处理器
@@ -39,6 +41,51 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # 全局变量
 bot_instance = None
 is_shutting_down = False
+
+
+def run_webapp_thread(bot_instance):
+    """在单独线程中运行 Web 应用"""
+    try:
+        logger.info("创建并启动 Web 控制面板...")
+        app = create_app(bot_instance)
+        run_webapp(app)
+    except Exception as e:
+        logger.error(f"Web 控制面板线程启动失败: {e}")
+
+
+async def run_bot_and_webapp():
+    """协调机器人和 Web 应用的启动"""
+    global bot_instance
+    try:
+        from bot.main import TelegramBot
+
+        # 1. 创建机器人实例
+        bot = TelegramBot()
+        bot_instance = bot
+        logger.info("🚀 启动 Telegram 机器人...")
+        await bot.setup_bot()
+
+        # 2. 在单独的线程中启动 Web 应用，并传入 bot 实例
+        webapp_thread = threading.Thread(
+            target=run_webapp_thread, args=(bot,), daemon=True
+        )
+        webapp_thread.start()
+        await asyncio.sleep(2)  # 给 Web 应用一些启动时间
+
+        # 显示访问信息
+        webapp_config = config_manager.get_webapp_config()
+        host = webapp_config.get("host", "0.0.0.0")
+        port = webapp_config.get("port", 5000)
+        logger.info(f"🌐 Web 控制面板已在 http://{host}:{port} 上可用")
+
+        # 3. Telegram 机器人开始轮询
+        await bot.start_polling()
+
+    except asyncio.CancelledError:
+        logger.info("主任务被取消，正在优雅关闭...")
+    except Exception as e:
+        logger.error(f"机器人或 Web 应用启动失败: {e}", exc_info=True)
+        raise
 
 
 async def shutdown(sig: signal.Signals, loop: asyncio.AbstractEventLoop):
@@ -79,35 +126,35 @@ async def shutdown(sig: signal.Signals, loop: asyncio.AbstractEventLoop):
         loop.stop()
 
 
-def run_webapp_thread():
-    """在单独线程中运行 Web 应用"""
-    try:
-        logger.info("启动 Web 控制面板线程...")
-        run_webapp()
-    except Exception as e:
-        logger.error(f"Web 控制面板启动失败: {e}")
+def register_signal_handlers(loop: asyncio.AbstractEventLoop):
+    """注册信号处理器，支持跨平台兼容性"""
+    # 构建可用信号列表，避免在不支持的平台上使用不存在的信号
+    available_signals = []
+    signal_names = ["SIGINT", "SIGTERM", "SIGHUP"]
 
+    for sig_name in signal_names:
+        if hasattr(signal, sig_name):
+            available_signals.append(getattr(signal, sig_name))
 
-async def run_bot():
-    """运行 Telegram 机器人"""
-    global bot_instance
-    try:
-        # 导入机器人主程序
-        from bot.main import TelegramBot
+    # 优先尝试使用 loop.add_signal_handler（Unix/Linux 系统）
+    for sig in available_signals:
+        try:
+            loop.add_signal_handler(
+                sig, lambda s=sig: asyncio.create_task(shutdown(s, loop))
+            )
+            logger.debug(f"已使用 add_signal_handler 注册信号 {sig.name}")
+        except (NotImplementedError, RuntimeError, ValueError, AttributeError):
+            # 回退到传统的 signal.signal 方式（Windows 或其他不支持的情况）
+            def signal_handler(received_sig, frame, sig=sig):
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(shutdown(sig, loop))
+                )
 
-        # 创建并启动机器人
-        bot = TelegramBot()
-        bot_instance = bot
-        await bot.setup_bot()
-        await bot.setup_bot_commands()
-        await bot.start_polling()
-
-    except asyncio.CancelledError:
-        logger.info("机器人任务被取消，正在优雅关闭...")
-        # 不重新抛出 CancelledError，让它正常结束
-    except Exception as e:
-        logger.error(f"机器人启动失败: {e}")
-        raise
+            try:
+                signal.signal(sig, signal_handler)
+                logger.debug(f"已使用 signal.signal 注册信号 {sig.name}")
+            except (OSError, ValueError) as e:
+                logger.warning(f"无法注册信号 {sig.name}: {e}")
 
 
 def main():
@@ -136,42 +183,15 @@ def main():
         logger.warning(f"⚠️ {e}")
         logger.info("AI 功能将不可用，请在配置中设置 OpenAI API Key")
 
-    # 启动 Web 控制面板（在单独线程中）
-    webapp_thread = threading.Thread(target=run_webapp_thread, daemon=True)
-    webapp_thread.start()
-    time.sleep(2)  # 等待 Web 应用启动
-
-    # 显示访问信息
-    webapp_config = config_manager.get_webapp_config()
-    host = webapp_config.get("host", "0.0.0.0")
-    port = webapp_config.get("port", 5000)
-    logger.info(f"🌐 Web 控制面板: http://{host}:{port}")
-    logger.info("🚀 启动 Telegram 机器人...")
-
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     try:
-        if sys.platform == "win32":
-            # Windows 不支持 add_signal_handler，我们使用传统方式
-            # 但通过 call_soon_threadsafe 与 asyncio 安全交互
-            def windows_signal_handler(sig, frame):
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(shutdown(signal.Signals(sig), loop))
-                )
+        # 注册信号处理器
+        register_signal_handlers(loop)
 
-            signal.signal(signal.SIGINT, windows_signal_handler)
-            signal.signal(signal.SIGTERM, windows_signal_handler)
-        else:
-            # POSIX 系统使用 add_signal_handler
-            signals_to_handle = [signal.SIGINT, signal.SIGTERM, signal.SIGHUP]
-            for s in signals_to_handle:
-                loop.add_signal_handler(
-                    s, lambda s=s: asyncio.create_task(shutdown(s, loop))
-                )
-
-        # 运行机器人主任务
-        loop.create_task(run_bot())
+        # 运行主协调任务
+        loop.create_task(run_bot_and_webapp())
         # 启动事件循环
         loop.run_forever()
 

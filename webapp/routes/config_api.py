@@ -3,7 +3,9 @@
 处理配置的获取、更新和重置
 """
 
-from flask import Blueprint, jsonify, request
+import asyncio
+
+from flask import Blueprint, current_app, jsonify, request
 from loguru import logger
 
 from config.settings import config_manager
@@ -33,7 +35,7 @@ def get_config():
 
 @bp.route("/api/config", methods=["POST"])
 def update_config():
-    """更新配置 API"""
+    """更新配置 API，并动态更新定时任务"""
     try:
         data = request.get_json()
 
@@ -46,9 +48,43 @@ def update_config():
 
         # 保存配置到Redis
         config_manager.save_config_to_redis()
+        logger.info("配置已通过 Web 面板更新并保存")
 
-        logger.info("配置已通过 Web 面板更新")
-        return jsonify({"success": True, "message": "配置已保存并将在30秒内生效"})
+        # 触发机器人重新调度任务
+        bot = getattr(current_app, "bot", None)
+        if bot and bot.application:
+            try:
+                # 获取当前运行的事件循环
+                loop = asyncio.get_running_loop()
+                asyncio.run_coroutine_threadsafe(bot.reschedule_jobs(), loop)
+                logger.info("已触发机器人定时任务的动态更新")
+                return jsonify(
+                    {"success": True, "message": "配置已保存，定时任务将立即生效"}
+                )
+            except RuntimeError:
+                # 如果没有运行的事件循环，在新线程中运行异步任务
+                import threading
+
+                def reschedule_in_thread():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(bot.reschedule_jobs())
+                        loop.close()
+                        logger.info("已触发机器人定时任务的动态更新")
+                    except Exception as e:
+                        logger.error(f"重新调度任务时出错: {e}")
+
+                thread = threading.Thread(target=reschedule_in_thread, daemon=True)
+                thread.start()
+                return jsonify(
+                    {"success": True, "message": "配置已保存，定时任务将立即生效"}
+                )
+        else:
+            logger.warning("未找到 Bot 实例，无法动态更新任务")
+            return jsonify(
+                {"success": True, "message": "配置已保存，但机器人未连接，重启后生效"}
+            )
 
     except Exception as e:
         logger.error(f"更新配置时出错: {e}")
@@ -57,15 +93,47 @@ def update_config():
 
 @bp.route("/api/config/reset", methods=["POST"])
 def reset_config():
-    """重置配置 API - 从环境变量重新加载配置，修复被占位符污染的缓存"""
+    """重置配置 API - 从环境变量重新加载配置，并动态更新"""
     try:
         # 强制从环境变量重新加载配置
         config_manager.reset_config_from_env()
-
         logger.info("配置已通过 Web 面板重置")
-        return jsonify(
-            {"success": True, "message": "配置已从环境变量重新加载，占位符问题已修复"}
-        )
+
+        # 触发机器人重新调度任务
+        bot = getattr(current_app, "bot", None)
+        if bot and bot.application:
+            try:
+                # 获取当前运行的事件循环
+                loop = asyncio.get_running_loop()
+                asyncio.run_coroutine_threadsafe(bot.reschedule_jobs(), loop)
+                logger.info("已触发机器人定时任务的动态更新")
+                return jsonify(
+                    {"success": True, "message": "配置已重置，定时任务将立即生效"}
+                )
+            except RuntimeError:
+                # 如果没有运行的事件循环，在新线程中运行异步任务
+                import threading
+
+                def reschedule_in_thread():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(bot.reschedule_jobs())
+                        loop.close()
+                        logger.info("已触发机器人定时任务的动态更新")
+                    except Exception as e:
+                        logger.error(f"重新调度任务时出错: {e}")
+
+                thread = threading.Thread(target=reschedule_in_thread, daemon=True)
+                thread.start()
+                return jsonify(
+                    {"success": True, "message": "配置已重置，定时任务将立即生效"}
+                )
+        else:
+            logger.warning("未找到 Bot 实例，无法动态更新任务")
+            return jsonify(
+                {"success": True, "message": "配置已重置，但机器人未连接，重启后生效"}
+            )
 
     except Exception as e:
         logger.error(f"重置配置时出错: {e}")

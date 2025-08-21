@@ -102,7 +102,10 @@ class AIServices:
             return []
 
     async def chat_completion(
-        self, history: List[Dict[str, Any]], user_id: Optional[int] = None
+        self,
+        history: List[Dict[str, Any]],
+        user_id: Optional[int] = None,
+        enable_md2tg: bool = True,
     ) -> Optional[str]:
         """
         AI 对话完成
@@ -151,14 +154,19 @@ class AIServices:
             content = response.choices[0].message.content
             reply = content.strip() if content is not None else ""
 
-            # 转换为 Telegram MarkdownV2 安全格式
-            safe_reply = escape(reply)
-
-            logger.info(
-                f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}, 转换后长度: {len(safe_reply)}"
-            )
-            logger.info(f"原始回复: {reply}")
-            logger.info(f"转换后回复: {safe_reply}")
+            if enable_md2tg:
+                # 转换为 Telegram MarkdownV2 安全格式
+                safe_reply = escape(reply)
+                logger.info(
+                    f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}, 转换后长度: {len(safe_reply)}"
+                )
+                logger.info(f"原始回复: {reply}")
+                logger.info(f"转换后回复: {safe_reply}")
+            else:
+                safe_reply = reply
+                logger.info(
+                    f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}"
+                )
             return safe_reply
 
         except openai.RateLimitError:
@@ -303,7 +311,8 @@ class AIServices:
             3. 活跃参与者
             4. 其他值得注意的内容
             
-            请用中文回答，保持简洁明了。
+            请用中文回答，保持简洁明了。不要在开头说“好的，这是对该群聊内容的简洁总结：”这类语句，
+            直接给出总结内容即可。
             """
 
             chat_messages = [{"role": "user", "content": full_prompt}]
@@ -319,6 +328,51 @@ class AIServices:
 
         except Exception as e:
             logger.error(f"群聊总结失败 - 群聊: {chat_title}, 错误: {e}")
+            return None
+
+    async def summarize_hotspot_news(self, content: str) -> Optional[str]:
+        """
+        总结热点新闻
+
+        Args:
+            content: 新闻内容字符串
+
+        Returns:
+            总结内容，失败时返回 None
+        """
+        try:
+            if not content:
+                return None
+
+            prompt = f"""
+            请根据以下内容，总结出核心要点。
+
+            内容：
+            {content}
+
+            要求：
+            1. 直接输出总结内容，不要包含任何额外的引导性或礼貌性用语（例如“好的，这是总结：”）。
+            2. 总结应简洁、清晰、准确。
+            3. 使用中文进行总结。
+            """
+
+            messages = [{"role": "user", "content": prompt}]
+            summary = await self.chat_completion(history=messages, enable_md2tg=False)
+
+            if summary:
+                logger.info("热点新闻总结成功")
+                # 再次清理，确保只返回核心内容
+                cleaned_summary = re.sub(
+                    r"^(好的|当然|这是|以下是)?(,|，)?\s*(对|关于)?.*?的总结(是|如下)?[：:]?\s*",
+                    "",
+                    summary,
+                    flags=re.IGNORECASE,
+                )
+                return cleaned_summary.strip()
+
+            return None
+        except Exception as e:
+            logger.error(f"热点新闻总结失败: {e}")
             return None
 
 

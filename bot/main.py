@@ -46,12 +46,14 @@ from bot.handlers.common import (
     switch_model_command,
 )
 from bot.handlers.draw import draw_command, draw_help_command
+from bot.handlers.hotspot_push import setup_hotspot_push_scheduler
 from bot.handlers.summary import (
     setup_cleanup_scheduler,
     setup_summary_scheduler,
     summary_command,
     summary_stats_command,
 )
+from bot.handlers.upstash_keepalive import setup_upstash_keepalive_scheduler
 from bot.handlers.welcome import (
     new_member_handler,
     set_welcome_command,
@@ -98,7 +100,9 @@ class TelegramBot:
             # 设置定时任务
             await self.setup_schedulers()
 
-            logger.info("机器人设置完成")
+            # 设置机器人命令菜单
+            await self.setup_bot_commands()
+            logger.info("Telegram 机器人应用已成功初始化")
 
         except Exception as e:
             logger.error(f"机器人设置失败: {e}")
@@ -159,8 +163,10 @@ class TelegramBot:
 
         logger.info("消息处理器注册完成")
 
-    async def setup_schedulers(self):
-        """设置定时任务"""
+    async def reschedule_jobs(self):
+        """根据最新配置重置所有定时任务"""
+        logger.info("正在根据最新配置重置定时任务...")
+
         # 群聊总结定时任务
         if config_manager.is_feature_enabled("auto_summary"):
             await setup_summary_scheduler(self.application, self.scheduler)
@@ -170,8 +176,20 @@ class TelegramBot:
 
         await setup_cleanup_scheduler(self.scheduler, message_store)
 
-        self.scheduler.start()
-        logger.info("定时任务设置完成")
+        # 热点新闻推送定时任务
+        await setup_hotspot_push_scheduler(self.application, self.scheduler)
+
+        # Upstash/Redis 保活任务
+        await setup_upstash_keepalive_scheduler(self.scheduler)
+
+        logger.info("定时任务重置完成。")
+
+    async def setup_schedulers(self):
+        """设置并启动定时任务"""
+        await self.reschedule_jobs()
+        if not self.scheduler.running:
+            self.scheduler.start()
+            logger.info("调度器已启动。")
 
     async def setup_bot_commands(self):
         """设置机器人命令菜单"""
@@ -323,9 +341,6 @@ async def main():
     # 创建并启动机器人
     bot = TelegramBot()
     await bot.setup_bot()
-
-    # 设置命令菜单
-    await bot.setup_bot_commands()
 
     await bot.start_polling()
 

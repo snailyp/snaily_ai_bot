@@ -5,6 +5,7 @@ Web 控制面板应用
 
 import os
 import sys
+from typing import Any, Optional
 
 from flask import Flask
 from flask_cors import CORS
@@ -25,9 +26,19 @@ from webapp.routes.status_api import bp as status_api_bp
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 
-def create_app():
-    """创建 Flask 应用"""
-    app = Flask(__name__)
+class CustomFlask(Flask):
+    """自定义 Flask 应用类，用于添加 bot 实例"""
+
+    bot: Optional[Any] = None
+
+
+def create_app(bot_instance: Optional[Any] = None) -> CustomFlask:
+    """创建并配置 Flask 应用"""
+    app = CustomFlask(__name__)
+
+    # 存储 bot 实例
+    if bot_instance:
+        app.bot = bot_instance
 
     # 获取配置
     webapp_config = config_manager.get_webapp_config()
@@ -52,10 +63,7 @@ def create_app():
     return app
 
 
-app = create_app()
-
-
-def run_webapp():
+def run_webapp(app):
     """运行 Web 应用"""
     try:
         webapp_config = config_manager.get_webapp_config()
@@ -64,7 +72,7 @@ def run_webapp():
         debug = webapp_config.get("debug", False)
 
         logger.info(f"启动 Web 控制面板: http://{host}:{port}")
-        app.run(host=host, port=port, debug=debug)
+        app.run(host=host, port=port, debug=debug, use_reloader=False)
 
     except Exception as e:
         logger.error(f"启动 Web 应用失败: {e}")
@@ -72,4 +80,6 @@ def run_webapp():
 
 
 if __name__ == "__main__":
-    run_webapp()
+    # 当独立运行时，不传递 bot 实例
+    main_app = create_app()
+    run_webapp(main_app)

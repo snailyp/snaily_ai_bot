@@ -15,6 +15,7 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV APP_VERSION=${VERSION}
 ENV BUILD_DATE=${BUILD_DATE}
+ENV TZ=Asia/Shanghai
 
 # 添加标签
 LABEL org.opencontainers.image.title="小蜗AI助手" \

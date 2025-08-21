@@ -158,6 +158,11 @@
                                 </button>
                             </li>
                             <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="hotspot-tab" data-bs-toggle="tab" data-bs-target="#hotspot-config" type="button" role="tab">
+                                    <i class="bi bi-broadcast"></i> 热点推送
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
                                 <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced-config" type="button" role="tab">
                                     <i class="bi bi-gear"></i> 高级设置
                                 </button>
@@ -375,6 +380,48 @@
                                     </div>
                                     <button type="submit" class="btn btn-primary">
                                         <i class="bi bi-check-lg"></i> 保存历史记录设置
+                                    </button>
+                                </form>
+                            </div>
+
+                            <!-- 热点推送配置 -->
+                            <div class="tab-pane fade" id="hotspot-config" role="tabpanel">
+                                <form id="hotspot-config-form">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" id="hotspot-push-enabled">
+                                                    <label class="form-check-label" for="hotspot-push-enabled">启用热点推送</label>
+                                                </div>
+                                                <small class="form-text text-muted">开启后，系统将按计划每日推送热点新闻到指定频道。</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="hotspot-push-schedule" class="form-label">每日推送时间</label>
+                                                <input type="time" class="form-control" id="hotspot-push-schedule">
+                                                <small class="form-text text-muted">设置每日自动推送的时间 (24小时制)。</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="hotspot-push-chat-id" class="form-label">Telegram 频道/群组 ID</label>
+                                                <input type="text" class="form-control" id="hotspot-push-chat-id" placeholder="@your_channel_name 或 -100123456789">
+                                                <small class="form-text text-muted">用于接收热点新闻的公开频道用户名或私有频道/群组 ID。</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="hotspot-sources" class="form-label">新闻来源</label>
+                                                <textarea class="form-control" id="hotspot-sources" rows="3" placeholder="例如: github-trending-today,hackernews,juejin"></textarea>
+                                                <small class="form-text text-muted">输入要获取的新闻来源，用英文逗号 (,) 分隔。</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="hotspot-keywords" class="form-label">过滤关键字</label>
+                                                <textarea class="form-control" id="hotspot-keywords" rows="3" placeholder="例如: AI,Python,Agent"></textarea>
+                                                <small class="form-text text-muted">输入要筛选的关键字，用英文逗号 (,) 分隔。不区分大小写。留空表示不过滤。</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="bi bi-check-lg"></i> 保存热点推送设置
                                     </button>
                                 </form>
                             </div>
