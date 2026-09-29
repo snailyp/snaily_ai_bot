@@ -4,6 +4,7 @@ import secrets
 import sys
 import threading
 from typing import Any, Dict
+import certifi
 
 # 启用 Windows 终端颜色支持
 if sys.platform == "win32":
@@ -33,6 +34,8 @@ class ConfigManager:
         self.config: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self.redis_client = None
+        
+        load_dotenv(self.env_path)  # 必须在读取 Redis 环境变量前加载
         self._init_redis()
         self.load_config()
 
@@ -49,6 +52,9 @@ class ConfigManager:
                     decode_responses=True,
                     socket_timeout=5,
                     socket_connect_timeout=5,
+                    ssl_ca_certs=certifi.where(),
+                    ssl_cert_reqs="required",
+                    ssl_check_hostname=True,
                 )
                 logger.info("使用 REDIS_URL 创建 Redis 连接")
             else:
