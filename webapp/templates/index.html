@@ -10,10 +10,44 @@
 {% macro save(label) -%}
 <div class="form-footer"><span class="save-state" role="status">修改后请保存设置</span><button class="btn btn-primary" type="submit">{{ icon('check') }}{{ label }}</button></div>
 {%- endmacro %}
+{% macro ai_collection(kind, collection, label, caption) -%}
+<section class="panel ai-collection" id="{{ kind }}-{{ collection }}-section">
+    <div class="panel-heading"><div><p class="eyebrow">{{ caption }}</p><h2>{{ label }}</h2></div><span class="subtle-badge" id="{{ kind }}-{{ collection }}-count">0 项</span></div>
+    <div class="ai-editor-layout">
+        <div class="ai-library"><div class="ai-library-list" id="{{ kind }}-{{ collection }}-list" aria-label="{{ label }}列表"></div><button class="btn btn-secondary ai-add" type="button" id="add-{{ kind }}-{{ collection }}">＋ 添加{{ '服务商' if collection == 'provider' else '模型' }}</button></div>
+        <div class="ai-editor-body">
+            <div class="ai-empty" id="{{ kind }}-{{ collection }}-empty"><span class="ai-empty-index">{{ '01' if collection == 'provider' else '02' }}</span><h3>还没有{{ '服务商' if collection == 'provider' else '模型' }}</h3><p>{{ '先添加独立的连接信息。密钥保存后不会再次显示。' if collection == 'provider' else '添加模型配置，再在上方分配用途。支持手动填写任意模型 ID。' }}</p></div>
+            <fieldset class="ai-editor" id="{{ kind }}-{{ collection }}-editor" hidden>
+                <legend class="sr-only">编辑{{ label }}</legend>
+                <div class="ai-editor-heading"><span class="tiny-label">EDITING / 仅编辑，不切换默认用途</span><button class="btn btn-quiet danger-text" type="button" id="remove-{{ kind }}-{{ collection }}">删除{{ '服务商' if collection == 'provider' else '模型' }}</button></div>
+                {% if collection == 'provider' %}
+                <div class="form-grid">{{ field(kind ~ '-provider-name', '服务商名称', placeholder='例如：我的 API 服务') }}
+                    {% if kind == 'drawing' %}<div class="field"><label for="drawing-provider-type">图像协议</label><select id="drawing-provider-type"><option value="openai_images">OpenAI Images</option><option value="gemini">Google Gemini</option><option value="seedream">火山方舟 · Seedream</option></select></div>{% else %}{{ field('text-provider-timeout', '请求超时 / 秒', 'number', min='0.001') }}{% endif %}
+                </div>
+                <div class="field"><label for="{{ kind }}-provider-url">Base URL</label><input type="url" id="{{ kind }}-provider-url" spellcheck="false" placeholder="https://api.openai.com/v1" aria-describedby="{{ kind }}-provider-url-hint"><small id="{{ kind }}-provider-url-hint">使用服务商的 API 根地址，支持兼容接口。</small><button class="ai-inline-action" type="button" id="{{ kind }}-provider-use-url">填入推荐地址</button></div>
+                <div class="field"><label for="{{ kind }}-provider-key">API Key <span class="ai-secret-status" id="{{ kind }}-provider-key-status"></span></label><input type="password" id="{{ kind }}-provider-key" autocomplete="new-password" spellcheck="false" placeholder="输入密钥" aria-describedby="{{ kind }}-provider-key-hint"><small id="{{ kind }}-provider-key-hint">留空保留已保存的密钥。仅在你明确勾选下方选项时删除。</small><label class="ai-check"><input type="checkbox" id="{{ kind }}-provider-clear-key">清除已保存的 API Key</label></div>
+                {% if kind == 'drawing' %}{{ field('drawing-provider-timeout', '请求超时 / 秒', 'number', min='0.001') }}{% endif %}
+                <details class="ai-details"><summary>自定义请求头 <span>可选 · 值按密钥保存</span></summary><div id="{{ kind }}-provider-headers"></div></details>
+                {% else %}
+                <div class="form-grid">{{ field(kind ~ '-model-name', '配置名称', placeholder='例如：日常对话 / 高质量创作') }}<div class="field"><label for="{{ kind }}-model-provider">关联服务商</label><select id="{{ kind }}-model-provider"></select><small>只使用这个服务商的连接和密钥。</small></div></div>
+                <div class="field"><label for="{{ kind }}-model-model">模型 ID</label><div class="input-group"><input id="{{ kind }}-model-model" type="text" list="{{ kind }}-model-suggestions" autocomplete="off" spellcheck="false" placeholder="手动输入任意模型 ID"><button type="button" class="btn btn-secondary" id="{{ kind }}-discover-models">获取建议</button></div><datalist id="{{ kind }}-model-suggestions"></datalist><small id="{{ kind }}-model-hint">建议列表不是限制；代理、自定义和新模型均可直接填写。</small></div>
+                {% if kind == 'text' %}
+                <div class="form-grid"><div class="field"><label for="text-model-api-type">请求协议</label><select id="text-model-api-type"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></select><small>按模型与服务商实际支持的协议选择。</small></div><div class="field" id="text-token-field"><label for="text-model-token-limit-field">Token 上限字段</label><select id="text-model-token-limit-field"><option value="max_completion_tokens">max_completion_tokens</option><option value="max_tokens">max_tokens</option></select><small>仅在勾选「最大输出 Token」时发送。</small></div></div>
+                {{ switch('text-model-supports-tools', '允许这个模型调用工具', '仅在服务商支持工具调用时启用；还需要开启 MCP 并配置访问权限。') }}
+                {% endif %}
+                <div class="ai-parameters-heading"><h3>请求参数</h3><p>按需勾选；未勾选的参数不发送，由服务商决定默认值。</p></div><div class="ai-parameters" id="{{ kind }}-model-parameters"></div>
+                {% if kind == 'text' %}<div class="ai-test-bar"><div><strong>验证一次真实请求</strong><small>使用当前草稿，可能产生少量费用，不保存配置。</small></div><button class="btn btn-secondary" type="button" id="test-text-model">测试模型</button></div><div class="ai-result" id="text-test-result" role="status" hidden></div>{% endif %}
+                {% endif %}
+            </fieldset>
+        </div>
+    </div>
+</section>
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token | default('') }}">
     <meta name="theme-color" content="#242622"><title>小蜗 · 控制台</title>
     <link rel="icon" href="data:,"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -67,12 +101,52 @@
             </section><div class="overview-rail"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">CONNECTIONS</p><h2>连接配置</h2></div>{{ icon('settings') }}</div><div id="status-overview" aria-live="polite"><p class="muted">正在检查配置…</p></div><p class="footnote">配置状态不代表服务可用性或机器人在线状态。</p></section><a class="shortcut-card" href="#hotspot-config"><span class="shortcut-icon">{{ icon('broadcast') }}</span><span class="eyebrow">DAILY DISCOVERY</span><h3>让热点，主动抵达。</h3><p>设置新闻来源与推送时间，<br>为你的社群准备每日精选。</p><span class="text-link">配置热点推送 {{ icon('arrow') }}</span></a></div></div>
             <div class="workspace-footer"><span>SNAILY · 为有价值的对话留出空间</span><span>配置控制台 / CONTROL PANEL</span></div>
         </section>
-        <section class="view" id="ai-config" aria-label="AI 配置" hidden><form id="ai-config-form">
-            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">01 / PROVIDER</p><h2>连接你的 AI</h2></div><span class="subtle-badge">OpenAI 兼容接口</span></div><div class="provider-toolbar"><div class="field"><label for="openai-config-select">配置组 · 保存时设为使用中的配置</label><select id="openai-config-select"></select></div><button class="btn btn-secondary" type="button" id="add-openai-config">＋ 添加配置</button><button class="btn btn-quiet danger-text" type="button" id="remove-openai-config">删除</button></div><div class="form-grid">
-            {{ field('openai-config-name','配置名称',placeholder='例如：主 API') }}{{ field('openai-api-key','API Key','password','密钥仅用于连接服务，请勿分享。','sk-…') }}{{ field('openai-base-url','Base URL','url','支持 OpenAI 兼容接口与第三方代理。','https://api.openai.com/v1') }}
-            <div class="field"><label for="openai-model">对话模型</label><div class="input-group"><select id="openai-model"></select><button class="icon-button" type="button" id="refresh-models" title="刷新模型列表" aria-label="刷新模型列表"><i>{{ icon('refresh') }}</i></button></div><small>填写连接信息后，可刷新可用模型。</small></div></div></section>
-            <div class="settings-columns"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">02 / CONVERSATION</p><h2>对话偏好</h2></div>{{ icon('chat') }}</div>{{ field('max-tokens','最大 Token 数','number','限制单次回复的最大长度。',min='100',value='1000') }}<div class="field"><label for="temperature">创造性 <output id="temperature-value" for="temperature">0.7</output></label><input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7"><div class="range-labels"><span>精确 · 0</span><span>灵活 · 2</span></div></div>{{ switch('chat-history-enabled','记住对话上下文','关闭后使用一问一答模式。') }}{{ field('chat-history-max-length','保留对话轮数','number','1 轮 = 1 问 1 答，建议 5–20 轮。',min='1',value='10') }}{{ switch('chat-auto-reply-private','私聊自动回复','自动回复收到的私聊消息。') }}{{ field('chat-short-message-threshold','短消息阈值','number','短于此字符数的消息被视为短消息。',min='1',value='1024') }}</section>
-            <section class="panel"><div class="panel-heading"><div><p class="eyebrow">03 / IMAGE GENERATION</p><h2>图像生成</h2></div>{{ icon('image') }}</div><div class="field"><label for="drawing-model">绘画模型</label><div class="input-group"><select id="drawing-model"></select><button class="icon-button" type="button" id="refresh-image-models" title="刷新绘画模型列表" aria-label="刷新绘画模型列表"><i>{{ icon('refresh') }}</i></button></div><small>与对话共用当前配置组的 API 连接。</small></div><div class="field"><label for="image-size">图片尺寸</label><select id="image-size"><option value="1024x1024">1024 × 1024 · 方形</option><option value="1792x1024">1792 × 1024 · 横向</option><option value="1024x1792">1024 × 1792 · 纵向</option></select></div><div class="field"><label for="image-quality">图片质量</label><select id="image-quality"><option value="standard">标准</option><option value="hd">高清</option></select></div>{{ field('daily-limit','每日绘画额度','number','设为 0 表示不限制。',min='0',max='100',value='10') }}<div class="editorial-note"><span>温馨提示</span><p>不同模型支持的尺寸和质量可能不同，请以服务商说明为准。</p></div></section></div>{{ save('保存 AI 配置') }}</form></section>
+        <section class="view" id="ai-config" aria-label="AI 配置" hidden><form id="ai-config-form" novalidate>
+            <section class="panel ai-routing"><div class="panel-heading"><div><p class="eyebrow">MODEL ROUTING / 各司其职</p><h2>合适的模型，放在合适的位置。</h2></div><span class="subtle-badge">保存后生效</span></div><p class="panel-description">连接可以复用，用途独立分配。下方切换编辑对象，不会改变这里的选择。</p>
+                <div class="ai-role-grid">
+                    <div class="ai-role"><span class="ai-role-index">01 / CHAT</span><label for="ai-chat-model">默认聊天模型</label><select id="ai-chat-model"></select><small>日常对话与私聊回复</small></div>
+                    <div class="ai-role"><span class="ai-role-index">02 / TASK</span><label for="ai-task-model">默认任务模型</label><select id="ai-task-model"></select><small id="ai-task-model-hint">群聊总结等后台文本任务；留空跟随聊天模型</small></div>
+                    <div class="ai-role"><span class="ai-role-index">03 / IMAGE</span><label for="ai-drawing-model">默认绘画模型</label><select id="ai-drawing-model"></select><small>使用独立的图像服务商与密钥</small></div>
+                </div>
+            </section>
+            <div class="ai-tabs" role="tablist" aria-label="AI 设置分类">
+                {% for id, name, index in [('providers','文本服务商','01'),('models','文本模型','02'),('drawing','图像生成','03'),('mcp','MCP 工具','04'),('preferences','对话偏好','05')] %}<button type="button" role="tab" class="ai-tab" id="ai-tab-{{ id }}" aria-controls="ai-pane-{{ id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}" data-ai-tab="{{ id }}"><span>{{ index }}</span>{{ name }}</button>{% endfor %}
+            </div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-providers" aria-labelledby="ai-tab-providers">{{ ai_collection('text', 'provider', '文本服务商', 'CONNECTION LIBRARY') }}</div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-models" aria-labelledby="ai-tab-models" hidden>{{ ai_collection('text', 'model', '文本模型', 'TEXT MODEL LIBRARY') }}</div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-drawing" aria-labelledby="ai-tab-drawing" hidden>
+                <div class="editorial-note ai-section-note"><span>图像连接，单独管理。</span><p>支持 OpenAI Images、Gemini 与火山方舟 Seedream。不沿用文本服务商的密钥；模型 ID 和推荐地址均可编辑。</p></div>
+                {{ ai_collection('drawing', 'provider', '图像服务商', 'IMAGE CONNECTIONS') }}
+                {{ ai_collection('drawing', 'model', '图像模型', 'IMAGE MODEL LIBRARY') }}
+                <section class="panel">{{ field('daily-limit','每日绘画额度','number','保存在功能设置中；设为 0 表示不限制。',min='0',value='10') }}</section>
+            </div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-mcp" aria-labelledby="ai-tab-mcp" hidden>
+                <section class="panel"><div class="panel-heading"><div><p class="eyebrow">TOOL ACCESS / 默认关闭</p><h2>给能力，划好边界。</h2></div><span class="subtle-badge" id="mcp-draft-state">未启用</span></div>
+                    {{ switch('mcp-enabled','启用 MCP 工具','关闭时不连接任何 MCP 服务；已有配置保留。保存后生效。') }}
+                    {{ switch('mcp-admin-only','仅管理员可使用','默认开启。关闭后按下方用户 / 群聊白名单限制访问。') }}
+                    <div class="form-grid">{{ field('mcp-allowed-users','允许的用户 ID',hint='用英文逗号或换行分隔。管理员限制与白名单由服务端共同校验。',placeholder='123456789, 987654321') }}{{ field('mcp-allowed-chats','允许的群聊 ID',hint='用英文逗号或换行分隔。留空不增加群聊白名单。',placeholder='-100123456789') }}</div>
+                    <details class="ai-details"><summary>调用预算 <span>限制轮数、次数与结果长度</span></summary><div class="form-grid">{{ field('mcp-max-rounds','最多工具轮数','number',min='1') }}{{ field('mcp-max-calls','最多工具调用次数','number',min='1') }}{{ field('mcp-timeout','总超时 / 秒','number',min='0.001') }}{{ field('mcp-max-result-chars','单次结果字符上限','number',min='1') }}</div></details>
+                    <div class="editorial-note"><p>还需为聊天模型开启工具支持。工具列表为空代表<strong>不允许任何工具</strong>；仅在明确填写 <code>*</code> 时允许全部工具。请只连接信任的服务。</p></div>
+                </section>
+                <section class="panel ai-collection"><div class="panel-heading"><div><p class="eyebrow">MCP SERVER LIBRARY</p><h2>工具服务</h2></div><span class="subtle-badge" id="mcp-server-count">0 项</span></div>
+                    <div class="ai-editor-layout"><div class="ai-library"><div class="ai-library-list" id="mcp-server-list" aria-label="MCP 服务列表"></div><button class="btn btn-secondary ai-add" type="button" id="add-mcp-server">＋ 添加服务</button></div>
+                        <div class="ai-editor-body"><div class="ai-empty" id="mcp-server-empty"><span class="ai-empty-index">MCP</span><h3>先从一个可信服务开始。</h3><p>支持 stdio、Streamable HTTP 和 SSE。新服务默认关闭，不会自动启动。</p></div>
+                            <fieldset class="ai-editor" id="mcp-server-editor" hidden><legend class="sr-only">编辑 MCP 服务</legend><div class="ai-editor-heading"><span class="tiny-label">SERVER / 独立开关与权限</span><button type="button" class="btn btn-quiet danger-text" id="remove-mcp-server">删除服务</button></div>
+                                {{ switch('mcp-server-enabled','启用此服务','仅当全局 MCP 同时开启时才允许连接。') }}
+                                <div class="form-grid">{{ field('mcp-server-name','服务名称',placeholder='例如：团队知识库') }}<div class="field"><label for="mcp-server-transport">传输方式</label><select id="mcp-server-transport"><option value="stdio">stdio · 本地进程</option><option value="streamable_http">Streamable HTTP</option><option value="sse">SSE</option></select></div></div>
+                                <div id="mcp-stdio-fields"><div class="ai-warning"><strong>stdio 会在服务器上执行命令。</strong><p>仅填写你信任的可执行文件。连接或探测时会启动进程；参数按 JSON 数组传递，不通过 Shell 解析。</p></div>{{ field('mcp-server-command','可执行命令',hint='单独填写程序名或完整路径，不要拼接参数。',placeholder='例如：uvx 或 /usr/local/bin/tool-server') }}<div class="field"><label for="mcp-server-args">参数 / JSON 字符串数组</label><textarea id="mcp-server-args" rows="3" spellcheck="false" placeholder='["--port", "8080"]'></textarea><small>例如 ["package-name", "--read-only"]；不支持 Shell 命令字符串。</small></div><details class="ai-details"><summary>环境变量 <span>密钥值不会回显</span></summary><div id="mcp-server-env"></div></details></div>
+                                <div id="mcp-http-fields" hidden>{{ field('mcp-server-url','服务 URL','url',hint='填写完整的 MCP 端点地址。',placeholder='https://example.com/mcp') }}<details class="ai-details"><summary>请求头 <span>如 Authorization</span></summary><div id="mcp-server-headers"></div></details></div>
+                                <div class="form-grid"><div class="field"><label for="mcp-server-tools">允许的工具名称</label><textarea id="mcp-server-tools" rows="3" placeholder="留空 = 不允许任何工具"></textarea><small>逗号或换行分隔；<code>*</code> 表示全部允许，请谨慎使用。</small></div>{{ field('mcp-server-timeout','服务超时 / 秒','number',min='0.001') }}</div>
+                                <div class="ai-test-bar"><div><strong>仅探测，不调用工具</strong><small id="mcp-probe-hint">开启全局和此服务后，可连接并读取工具列表。</small></div><button type="button" class="btn btn-secondary" id="test-mcp-server">探测工具列表</button></div><div class="ai-result" id="mcp-test-result" role="status" hidden></div>
+                            </fieldset>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-preferences" aria-labelledby="ai-tab-preferences" hidden><section class="panel narrow-panel"><div class="panel-heading"><div><p class="eyebrow">CONVERSATION & MEMORY</p><h2>让对话，保持熟悉的节奏。</h2></div>{{ icon('chat') }}</div>{{ switch('chat-history-enabled','记住对话上下文','关闭后使用一问一答模式。') }}{{ field('chat-history-max-length','保留对话轮数','number','1 轮 = 1 问 1 答，建议 5–20 轮。',min='1',value='10') }}{{ switch('chat-auto-reply-private','私聊自动回复','自动回复收到的私聊消息。') }}{{ field('chat-short-message-threshold','短消息阈值','number','短于此字符数的消息被视为短消息。',min='1',value='1024') }}<div class="editorial-note"><p>温度、Token 上限等请求参数在「文本模型」内单独设置；历史清理策略仍在 <a href="#history-config">历史记录</a> 管理。</p></div></section></div>
+            <div class="ai-validation" id="ai-validation" role="alert" hidden></div>
+            {{ save('保存全部 AI 设置') }}
+        </form></section>
         <section class="view" id="welcome-config" aria-label="欢迎消息" hidden><form id="welcome-config-form"><div class="settings-columns"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">MESSAGE TEMPLATE</p><h2>第一句，留点温度。</h2></div>{{ icon('chat') }}</div><div class="field"><label for="welcome-message">欢迎消息模板</label><textarea id="welcome-message" rows="9" placeholder="欢迎 {user_name} 加入 {chat_title}！"></textarea><small>可使用下列变量，发送时会自动替换。</small></div><div class="variable-list"><code>{user_name}</code><span>成员名称</span><code>{user_mention}</code><span>提及成员</span><code>{chat_title}</code><span>群聊名称</span></div></section><section class="preview-panel"><p class="eyebrow">LIVE PREVIEW / 实时预览</p><div class="chat-preview"><span class="preview-avatar">@</span><div><span class="preview-name">小蜗助手 <span>BOT</span></span><div id="welcome-preview"></div><span class="preview-time">示例消息 · 仅预览文本</span></div></div><p class="footnote">预览使用示例成员；实际格式以 Telegram 展示为准。</p></section></div>{{ save('保存欢迎消息') }}</form></section>
         <section class="view" id="summary-config" aria-label="群聊总结" hidden><form id="summary-config-form"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">CHAT DIGEST</p><h2>留住重点，而不是每条消息。</h2></div>{{ icon('file') }}</div><div class="form-grid">{{ field('summary-interval','总结间隔 / 小时','number','系统按此间隔执行自动总结。',min='1',max='168',value='24') }}{{ field('min-messages','最少消息数','number','消息达到此数量后才触发总结。',min='5',max='1000',value='50') }}</div><div class="field"><label for="summary-prompt">总结提示词</label><textarea id="summary-prompt" rows="7" placeholder="请总结以下群聊对话的主要内容和话题："></textarea><small>告诉 AI 你关心什么，例如主要话题、关键结论或待办事项。</small></div><div class="editorial-note"><p>自动总结的功能开关位于 <a href="#overview">系统概览</a>，此处修改总结规则。</p></div></section>{{ save('保存总结设置') }}</form></section>
         <section class="view" id="history-config" aria-label="历史记录" hidden><form id="history-config-form"><section class="panel narrow-panel"><div class="panel-heading"><div><p class="eyebrow">DATA RETENTION</p><h2>让记录，恰到好处。</h2></div>{{ icon('clock') }}</div>{{ switch('history-cleanup-enabled','自动清理历史记录','定期清理超过保留期限的记录。') }}{{ field('history-cleanup-retention-days','保留天数','number','过期记录会被自动清理，请根据需要设置。',min='1',max='365',value='30') }}<div class="editorial-note"><span>关于对话上下文</span><p>此处管理历史记录清理策略。机器人记住的对话轮数，请前往 <a href="#ai-config">AI 配置</a> 设置。</p></div></section>{{ save('保存历史记录设置') }}</form></section>
@@ -83,7 +157,7 @@
     </main>
 </div>
 <div class="toast" id="notification-toast" role="status" aria-live="polite" aria-atomic="true"><span class="toast-symbol" aria-hidden="true">i</span><div id="toast-message"></div><button class="icon-button" id="dismiss-toast" aria-label="关闭通知">×</button></div>
-<script>window.current_chat_model = {{ current_chat_model | tojson }};</script>
+<script src="{{ url_for('static', filename='ai-config.js') }}"></script>
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

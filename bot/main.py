@@ -99,6 +99,9 @@ class TelegramBot:
             # 注册命令处理器
             self.register_handlers()
 
+            # 在机器人事件循环内应用 AI/MCP 配置。
+            await ai_services.reload_config()
+
             # 设置定时任务
             await self.setup_schedulers()
 
@@ -117,6 +120,21 @@ class TelegramBot:
         if not self.loop or not self.loop.is_running():
             return False
         asyncio.run_coroutine_threadsafe(self.reschedule_jobs(), self.loop)
+        return True
+
+    def request_ai_reload(self):
+        """Web 线程只投递请求，不创建或关闭异步客户端。"""
+        if not self.loop or not self.loop.is_running() or self._is_stopping:
+            return False
+        future = asyncio.run_coroutine_threadsafe(ai_services.reload_config(), self.loop)
+
+        def completed(result):
+            try:
+                result.result()
+            except Exception as exc:
+                logger.warning(f"AI 配置重载失败: {type(exc).__name__}")
+
+        future.add_done_callback(completed)
         return True
 
     def register_handlers(self):
@@ -305,6 +323,7 @@ class TelegramBot:
                 except Exception as e:
                     logger.warning(f"停止应用程序时出现警告: {e}")
 
+            await ai_services.aclose()
             self._is_stopped = True
             logger.info("机器人已成功停止")
 

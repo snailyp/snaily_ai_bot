@@ -176,12 +176,18 @@ def main():
         logger.info("请在 .env 文件中设置正确的 TELEGRAM_BOT_TOKEN")
         return
 
-    try:
-        config_manager.get_openai_api_key()
-        logger.info("✅ OpenAI API Key 已配置")
-    except ValueError as e:
-        logger.warning(f"⚠️ {e}")
-        logger.info("AI 功能将不可用，请在配置中设置 OpenAI API Key")
+    from config.ai_config import resolve_image_model, resolve_text_model
+
+    for role, label in (("chat", "聊天"), ("task", "任务"), ("drawing", "绘图")):
+        try:
+            ai_config = config_manager.get_ai_config()
+            if role == "drawing":
+                resolve_image_model(ai_config)
+            else:
+                resolve_text_model(ai_config, role)
+            logger.info(f"✅ {label}模型已配置（不代表上游可用）")
+        except ValueError:
+            logger.warning(f"⚠️ {label}模型未配置，可在控制面板设置")
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

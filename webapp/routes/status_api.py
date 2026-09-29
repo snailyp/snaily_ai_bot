@@ -1,47 +1,34 @@
-"""
-状态API路由
-处理机器人状态查询
-"""
+"""配置状态不等于上游在线状态；MCP 连接单独报告。"""
 
-from flask import Blueprint, jsonify
-from loguru import logger
+from flask import Blueprint, current_app, jsonify
 
+from config.ai_config import resolve_image_model, resolve_text_model
 from config.settings import config_manager
 
-# 创建状态API蓝图
 bp = Blueprint("status_api", __name__)
 
 
-@bp.route("/api/status")
+@bp.get("/api/status")
 def get_status():
-    """获取机器人状态 API"""
-    try:
-        features = config_manager.get_features_config()
-
+    features = config_manager.get_features_config()
+    ai_config = config_manager.get_ai_config()
+    configured = {}
+    for role in ("chat", "task", "drawing"):
         try:
-            openai_configured = bool(config_manager.get_openai_api_key())
+            provider, model = resolve_image_model(ai_config) if role == "drawing" else resolve_text_model(ai_config, role)
+            configured[f"{role}_model"] = bool(provider.get("api_base_url") and model.get("model"))
         except ValueError:
-            # 未配置 Key 是可展示的运行状态，不应让状态接口返回 500。
-            openai_configured = False
-
-        status = {
-            "features": {
-                "chat": features.get("chat", {}).get("enabled", False),
-                "drawing": features.get("drawing", {}).get("enabled", False),
-                "search": features.get("search", {}).get("enabled", False),
-                "auto_summary": features.get("auto_summary", {}).get("enabled", False),
-                "welcome_message": features.get("welcome_message", {}).get(
-                    "enabled", False
-                ),
-            },
-            "config_status": {
-                "bot_token": bool(config_manager.get("telegram.bot_token")),
-                "openai_api_key": openai_configured,
-            },
-        }
-
-        return jsonify({"success": True, "status": status})
-
-    except Exception as e:
-        logger.error(f"获取状态时出错: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+            configured[f"{role}_model"] = False
+    configured.update(bot_token=bool(config_manager.get("telegram.bot_token")),
+                      mcp_enabled=ai_config.get("mcp", {}).get("enabled", False),
+                      openai_api_key=configured["chat_model"])
+    bot = getattr(current_app, "bot", None)
+    mcp_status = {"runtime_connected": bool(bot and bot.loop and bot.loop.is_running())}
+    if mcp_status["runtime_connected"]:
+        from bot.services.ai_services import ai_services
+        mcp_status["servers"] = ai_services.mcp.status()
+    return jsonify(success=True, status={
+        "features": {key: value.get("enabled", False) for key, value in features.items() if isinstance(value, dict) and "enabled" in value},
+        "config_status": configured,
+        "mcp": mcp_status,
+    })

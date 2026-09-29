@@ -5,9 +5,10 @@
 ## ✨ 主要功能
 
 ### 🤖 AI 功能
-- **💬 智能对话** - 基于 OpenAI GPT 的智能对话系统
-- **🎨 AI 绘画** - 使用 DALL-E 生成高质量图片
-- **🔍 联网搜索** - 智能搜索和信息查询
+- **💬 智能对话** - 支持 OpenAI 兼容 Chat Completions / Responses，聊天和任务模型分别选择
+- **🎨 AI 绘画** - 独立绘图提供商，支持 GPT Image、Google Nano Banana、火山方舟 Seedream
+- **🔌 MCP 工具** - 支持 stdio、Streamable HTTP、SSE；默认关闭，可按服务器和用户授权
+- **🔍 信息查询** - 知识库摘要；可在获授权的聊天中通过 MCP 工具获取外部信息
 
 ### 📱 群组功能
 - **📝 群聊总结** - 定时自动总结群聊内容和重要话题
@@ -90,6 +91,12 @@ python -m webapp.app  # 仅启动 Web 控制面板
 - 自定义欢迎消息
 - 调整总结设置
 
+## 🧩 AI 提供商、模型与 MCP
+
+详见 [AI 配置指南](docs/ai-configuration.md)：可选参数默认不发送、自定义 Headers、Chat / Responses、独立绘图凭证、MCP 工具许可及旧配置迁移。
+
+> 升级需安装整份依赖，而不只是追加 `mcp`。旧 Telegram/OpenAI 的 HTTP 和异步依赖与 MCP 不兼容，建议使用独立虚拟环境。Web 修改在没有 Redis 时仅保存在内存中，重启会恢复环境配置。
+
 ## 📖 使用指南
 
 ### 基础命令
@@ -149,23 +156,9 @@ python -m webapp.app  # 仅启动 Web 控制面板
 
 ### AI 服务配置
 
-```json
-{
-  "ai_services": {
-    "openai": {
-      "api_key": "your-api-key",
-      "model": "gpt-3.5-turbo",
-      "max_tokens": 1000,
-      "temperature": 0.7
-    },
-    "drawing": {
-      "model": "dall-e-3",
-      "size": "1024x1024",
-      "quality": "standard"
-    }
-  }
-}
-```
+AI 设置使用 `schema_version: 2`，文本提供商、文本模型和绘图提供商分别维护；聊天、任务及绘图角色通过稳定模型 ID 选择。可选参数仅在显式启用后发送。
+
+通过 Web 面板配置，或使用 `AI_SERVICES_JSON` 环境变量。完整示例、旧配置迁移和 MCP 权限说明见 [AI 配置指南](docs/ai-configuration.md)。
 
 ## 📁 项目结构
 

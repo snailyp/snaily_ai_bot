@@ -3,6 +3,8 @@
 class BotControlPanel {
     constructor() {
         this.config = {};
+        this.csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        this.aiEditor = new AIConfigEditor(this);
         this.init();
     }
 
@@ -114,20 +116,39 @@ class BotControlPanel {
         document.getElementById('connection-text').textContent = text;
     }
 
+    // 只给同源本地 API 写请求添加 CSRF；外部部署 Webhook 不经过此方法。
+    async apiFetch(url, options = {}) {
+        const target = new URL(url, location.href);
+        const headers = new Headers(options.headers || {});
+        const method = (options.method || 'GET').toUpperCase();
+        if (target.origin === location.origin && target.pathname.startsWith('/api/')) {
+            if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                headers.set('X-CSRF-Token', this.csrfToken);
+            }
+        }
+        const response = await fetch(url, { ...options, headers });
+        if (response.status === 401 || (response.redirected && new URL(response.url, location.href).pathname.includes('/login'))) {
+            throw new Error('登录已过期，请重新登录后重试');
+        }
+        if (response.status === 403) {
+            let message = '请求被拒绝，请刷新页面或重新登录后重试';
+            try { message = (await response.clone().json()).error || message; } catch (_) { /* 非 JSON 错误保持可读提示 */ }
+            throw new Error(message);
+        }
+        return response;
+    }
+
     // 加载配置
     async loadConfig() {
         const retry = document.getElementById('retry-config');
         retry.disabled = true;
         document.getElementById('load-message').textContent = '正在读取工作空间配置…';
         try {
-            const response = await fetch('/api/config');
+            const response = await this.apiFetch('/api/config');
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || '配置加载失败');
+            this.csrfToken = data.csrf_token || this.csrfToken;
             this.config = data.config;
-            this.config.ai_services = this.config.ai_services || {};
-            if (!this.config.ai_services.openai_configs?.length) {
-                this.config.ai_services.openai_configs = [{}];
-            }
             this.updateUI();
             document.getElementById('workspace-content').inert = false;
             document.getElementById('load-notice').hidden = true;
@@ -178,63 +199,9 @@ class BotControlPanel {
         });
     }
 
-    // 更新AI配置表单
+    // AI 编辑器持有独立草稿，直到服务端确认保存。
     updateAIConfigForm() {
-        const aiConfig = this.config.ai_services || {};
-        const openaiConfigs = aiConfig.openai_configs || [{}];
-        const activeIndex = aiConfig.active_openai_config_index || 0;
-        const drawingConfig = aiConfig.drawing || {};
-        const chatConfig = this.config.features?.chat || {};
-
-        // 更新配置组下拉列表
-        const configSelect = document.getElementById('openai-config-select');
-        configSelect.innerHTML = '';
-        openaiConfigs.forEach((config, index) => {
-            const option = document.createElement('option');
-            option.value = index;
-            option.textContent = config.name || `配置 ${index + 1}`;
-            if (index === activeIndex) {
-                option.selected = true;
-            }
-            configSelect.appendChild(option);
-        });
-
-        // 初始化模型选择框（不填充默认模型）
-        this.initializeModelSelects();
-
-        // 根据当前选中的配置更新表单
-        this.editingConfigIndex = activeIndex;
-        this.updateChatModelSelect(openaiConfigs[activeIndex] || {});
-        this.updateOpenAIFormFields(openaiConfigs[activeIndex] || {});
-
-        // 绘画配置
-        this.setFormValue('drawing-model', drawingConfig.model || 'dall-e-3');
-        this.setFormValue('image-size', drawingConfig.size || '1024x1024');
-        this.setFormValue('image-quality', drawingConfig.quality || 'standard');
-        this.setFormValue('daily-limit', this.config.features?.drawing?.daily_limit ?? 10);
-        document.getElementById('chat-history-enabled').checked = chatConfig.history_enabled ?? true;
-        this.setFormValue('chat-history-max-length', chatConfig.history_max_length ?? 10);
-
-        // 聊天功能配置 - 新增的配置项
-        const autoReplyPrivateCheckbox = document.getElementById('chat-auto-reply-private');
-        if (autoReplyPrivateCheckbox) {
-            autoReplyPrivateCheckbox.checked = chatConfig.auto_reply_private || false;
-        }
-        this.setFormValue('chat-short-message-threshold', chatConfig.short_message_threshold || 1024);
-    }
-
-    updateOpenAIFormFields(config) {
-        this.setFormValue('openai-config-name', config.name || '');
-        this.setFormValue('openai-api-key', config.api_key || '');
-        this.setFormValue('openai-base-url', config.api_base_url || 'https://api.openai.com/v1');
-        this.setFormValue('openai-model', config.model || 'gpt-3.5-turbo');
-        this.setFormValue('max-tokens', config.max_tokens || 1000);
-        this.setFormValue('temperature', config.temperature ?? 0.7);
-        
-        const tempValue = document.getElementById('temperature-value');
-        if (tempValue) {
-            tempValue.textContent = config.temperature ?? 0.7;
-        }
+        this.aiEditor.load(this.config);
     }
 
     // 更新欢迎消息表单
@@ -303,7 +270,7 @@ class BotControlPanel {
         const button = document.getElementById('refresh-status');
         this.setButtonLoading(button, true);
         try {
-            const response = await fetch('/api/status');
+            const response = await this.apiFetch('/api/status');
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || '状态读取失败');
             this.renderStatusOverview(data.status);
@@ -321,14 +288,14 @@ class BotControlPanel {
         const container = document.getElementById('status-overview');
         const configStatus = status.config_status || {};
         container.replaceChildren();
-        [['Telegram Bot', configStatus.bot_token], ['OpenAI API', configStatus.openai_api_key]].forEach(([name, configured]) => {
+        [['Telegram Bot', configStatus.bot_token], ['聊天模型', configStatus.chat_model], ['任务模型', configStatus.task_model], ['绘画模型', configStatus.drawing_model], ['MCP 工具', configStatus.mcp_enabled]].forEach(([name, configured]) => {
             const row = document.createElement('div');
             row.className = 'connection-row';
             const label = document.createElement('span');
             label.textContent = name;
             const state = document.createElement('span');
             state.className = `state-label${configured ? '' : ' warning'}`;
-            state.textContent = configured ? '✓ 已配置' : '! 未配置';
+            state.textContent = name === 'MCP 工具' ? (configured ? '已启用 · 未验证连接' : '未启用') : (configured ? '已配置' : '未配置');
             row.append(label, state);
             container.append(row);
         });
@@ -355,94 +322,12 @@ class BotControlPanel {
             });
         });
 
-        // 温度滑块
-        const tempSlider = document.getElementById('temperature');
-        if (tempSlider) {
-            tempSlider.addEventListener('input', (e) => {
-                const value = document.getElementById('temperature-value');
-                if (value) {
-                    value.textContent = e.target.value;
-                }
-            });
-        }
-
         // 欢迎消息预览
         const welcomeTextarea = document.getElementById('welcome-message');
         if (welcomeTextarea) {
             welcomeTextarea.addEventListener('input', () => {
                 this.updateWelcomePreview();
             });
-        }
-
-        // 刷新模型列表
-        const refreshModelsBtn = document.getElementById('refresh-models');
-        if (refreshModelsBtn) {
-            refreshModelsBtn.addEventListener('click', () => {
-                // 直接从表单字段获取当前API密钥值
-                const apiKey = document.getElementById('openai-api-key').value;
-                const baseUrl = document.getElementById('openai-base-url').value;
-                
-                if (!apiKey.trim()) {
-                    this.showNotification('请先输入 API Key', 'warning');
-                    return;
-                }
-                
-                const config = {
-                    api_key: apiKey,
-                    api_base_url: baseUrl
-                };
-                this.loadOpenAIModels(config);
-            });
-        }
-        const refreshImageModelsBtn = document.getElementById('refresh-image-models');
-        if (refreshImageModelsBtn) {
-            refreshImageModelsBtn.addEventListener('click', () => {
-                // 直接从表单字段获取当前API密钥值
-                const apiKey = document.getElementById('openai-api-key').value;
-                const baseUrl = document.getElementById('openai-base-url').value;
-                
-                if (!apiKey.trim()) {
-                    this.showNotification('请先输入 API Key', 'warning');
-                    return;
-                }
-                
-                const config = {
-                    api_key: apiKey,
-                    api_base_url: baseUrl
-                };
-                this.loadOpenAIModels(config);
-            });
-        }
-
-        // OpenAI 配置组切换
-        var configSelect = document.getElementById('openai-config-select');
-        if (configSelect) {
-            configSelect.addEventListener('change', (e) => {
-                // 切换到新的配置
-                this.updateCurrentConfigFromForm();
-                const newIndex = parseInt(e.target.value);
-                this.editingConfigIndex = newIndex;
-                const openaiConfigs = this.config.ai_services.openai_configs || [];
-                const newConfig = openaiConfigs[newIndex] || {};
-
-                // 更新表单字段
-                this.updateOpenAIFormFields(newConfig);
-
-                // 更新聊天模型选择框，显示该配置的默认模型
-                this.updateChatModelSelect(newConfig);
-
-                // 绘图模型保持不变，不跟随配置组变化
-            });
-        }
-
-        // 添加/删除 OpenAI 配置组
-        var addConfigBtn = document.getElementById('add-openai-config');
-        if (addConfigBtn) {
-            addConfigBtn.addEventListener('click', () => this.addOpenAIConfig());
-        }
-        var removeConfigBtn = document.getElementById('remove-openai-config');
-        if (removeConfigBtn) {
-            removeConfigBtn.addEventListener('click', () => this.removeOpenAIConfig());
         }
 
         // Render 重启按钮
@@ -527,7 +412,7 @@ class BotControlPanel {
         toggle.disabled = true;
         this.updateFeatureLabels();
         try {
-            const response = await fetch(`/api/features/${feature}/toggle`, {
+            const response = await this.apiFetch(`/api/features/${feature}/toggle`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }
             });
             const data = await response.json();
@@ -542,54 +427,8 @@ class BotControlPanel {
         }
     }
 
-    // 保存AI配置
     async saveAIConfig() {
-        const button = document.querySelector('#ai-config-form button[type="submit"]');
-        this.setButtonLoading(button, true);
-
-        try {
-            // 从表单收集当前配置
-            this.updateCurrentConfigFromForm();
-
-            const formData = {
-                openai_configs: this.config.ai_services.openai_configs,
-                active_openai_config_index: parseInt(document.getElementById('openai-config-select').value),
-                drawing: {
-                    model: document.getElementById('drawing-model').value,
-                    size: document.getElementById('image-size').value,
-                    quality: document.getElementById('image-quality').value,
-                    daily_limit: parseInt(document.getElementById('daily-limit').value)
-                },
-                chat: {
-                    history_enabled: document.getElementById('chat-history-enabled').checked,
-                    history_max_length: parseInt(document.getElementById('chat-history-max-length').value) || 10,
-                    auto_reply_private: document.getElementById('chat-auto-reply-private').checked,
-                    short_message_threshold: parseInt(document.getElementById('chat-short-message-threshold').value) || 50
-                }
-            };
-
-            const response = await fetch('/api/ai_config', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(formData)
-            });
-
-            const data = await response.json();
-            
-            if (data.success) {
-                this.showNotification(data.message, 'success');
-                this.updateStatus();
-                this.markSaved('ai-config-form');
-            } else {
-                this.showNotification('保存失败: ' + data.error, 'error');
-            }
-        } catch (error) {
-            this.showNotification('网络错误: ' + error.message, 'error');
-        } finally {
-            this.setButtonLoading(button, false);
-        }
+        await this.aiEditor.save();
     }
 
     // 保存欢迎消息配置
@@ -600,7 +439,7 @@ class BotControlPanel {
         try {
             const message = document.getElementById('welcome-message').value;
 
-            const response = await fetch('/api/welcome_message', {
+            const response = await this.apiFetch('/api/welcome_message', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -719,7 +558,7 @@ class BotControlPanel {
 
     // 通用配置更新方法
     async updateConfig(configData) {
-        const response = await fetch('/api/config', {
+        const response = await this.apiFetch('/api/config', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -788,229 +627,6 @@ class BotControlPanel {
         }, 30000);
     }
 
-    // 加载并更新OpenAI模型列表
-    async loadOpenAIModels(config) {
-        const refreshBtn = document.getElementById('refresh-models');
-        const refreshImageBtn = document.getElementById('refresh-image-models');
-        const icon = refreshBtn.querySelector('i');
-        const imageIcon = refreshImageBtn.querySelector('i');
-        const requestedGroup = this.editingConfigIndex;
-
-        // 设置加载状态
-        icon.classList.add('fa-spin');
-        imageIcon.classList.add('fa-spin');
-        refreshBtn.disabled = true;
-        refreshImageBtn.disabled = true;
-
-        try {
-            const response = await fetch('/api/openai/models', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    api_key: config.api_key,
-                    api_base_url: config.api_base_url
-                })
-            });
-            const data = await response.json();
-
-            if (data.success) {
-                if (this.editingConfigIndex !== requestedGroup) return;
-                const models = data.models;
-                
-                // 更新聊天模型选择框
-                const chatSelectElement = document.getElementById('openai-model');
-                const chatSelectedValue = chatSelectElement.value;
-                chatSelectElement.innerHTML = '';
-                
-                // 更新绘画模型选择框
-                const drawingSelectElement = document.getElementById('drawing-model');
-                const drawingSelectedValue = drawingSelectElement.value;
-                drawingSelectElement.innerHTML = '';
-                
-                // 填充所有模型到两个选择框
-                models.forEach(model => {
-                    // 聊天模型选择框
-                    const chatOption = document.createElement('option');
-                    chatOption.value = model.id;
-                    chatOption.textContent = model.name;
-                    chatSelectElement.appendChild(chatOption);
-                    
-                    // 绘画模型选择框
-                    const drawingOption = document.createElement('option');
-                    drawingOption.value = model.id;
-                    drawingOption.textContent = model.name;
-                    drawingSelectElement.appendChild(drawingOption);
-                });
-
-                // 刷新列表不应悄悄替换已配置的模型。
-                [[chatSelectElement, chatSelectedValue], [drawingSelectElement, drawingSelectedValue]].forEach(([select, value]) => {
-                    if (value && !Array.from(select.options).some(option => option.value === value)) {
-                        select.add(new Option(value, value));
-                    }
-                    if (value) select.value = value;
-                });
-                if (chatSelectElement.value !== chatSelectedValue || drawingSelectElement.value !== drawingSelectedValue) {
-                    this.markDirty(document.getElementById('ai-config-form'));
-                }
-
-                this.showNotification('模型列表已更新', 'success');
-            } else {
-                this.showNotification(`加载模型列表失败: ${data.error}`, 'error');
-            }
-        } catch (error) {
-            this.showNotification(`网络错误: ${error.message}`, 'error');
-        } finally {
-            icon.classList.remove('fa-spin');
-            imageIcon.classList.remove('fa-spin');
-            refreshBtn.disabled = false;
-            refreshImageBtn.disabled = false;
-        }
-    }
-
-    selectConfigGroup(index) {
-        const select = document.getElementById('openai-config-select');
-        select.replaceChildren();
-        this.config.ai_services.openai_configs.forEach((config, i) => {
-            select.add(new Option(config.name || `配置 ${i + 1}`, String(i)));
-        });
-        select.value = index;
-        this.editingConfigIndex = index;
-        const config = this.config.ai_services.openai_configs[index];
-        this.updateChatModelSelect(config);
-        this.updateOpenAIFormFields(config);
-        this.markDirty(document.getElementById('ai-config-form'));
-    }
-
-    addOpenAIConfig() {
-        this.updateCurrentConfigFromForm();
-        const configs = this.config.ai_services.openai_configs;
-        configs.push({
-            name: `新配置 ${configs.length + 1}`,
-            api_key: '', api_base_url: 'https://api.openai.com/v1',
-            model: '', max_tokens: 1000, temperature: 0.7
-        });
-        this.selectConfigGroup(configs.length - 1);
-    }
-
-    removeOpenAIConfig() {
-        const configs = this.config.ai_services.openai_configs;
-        if (configs.length <= 1) {
-            this.showNotification('至少需要保留一个配置组', 'warning');
-            return;
-        }
-        if (!window.confirm('删除当前配置组？保存 AI 配置后生效。')) return;
-        configs.splice(this.editingConfigIndex, 1);
-        this.selectConfigGroup(0);
-    }
-
-    updateCurrentConfigFromForm() {
-        const configs = this.config.ai_services.openai_configs;
-        const currentIndex = this.editingConfigIndex ?? parseInt(document.getElementById('openai-config-select').value);
-        if (configs && configs[currentIndex]) {
-            const currentConfig = configs[currentIndex];
-            currentConfig.name = document.getElementById('openai-config-name').value;
-            currentConfig.api_key = document.getElementById('openai-api-key').value;
-            currentConfig.api_base_url = document.getElementById('openai-base-url').value;
-            currentConfig.model = document.getElementById('openai-model').value;
-            currentConfig.max_tokens = parseInt(document.getElementById('max-tokens').value);
-            currentConfig.temperature = parseFloat(document.getElementById('temperature').value);
-        }
-    }
-
-    // 初始化模型选择框（显示已配置的模型或提示信息）
-    initializeModelSelects() {
-        const chatModelSelect = document.getElementById('openai-model');
-        const drawingModelSelect = document.getElementById('drawing-model');
-        
-        if (chatModelSelect) {
-            // 如果有当前聊天模型，显示它
-            const currentChatModel = window.current_chat_model;
-            if (currentChatModel && currentChatModel.trim()) {
-                chatModelSelect.innerHTML = '';
-                const option = document.createElement('option');
-                option.value = currentChatModel;
-                option.textContent = currentChatModel;
-                option.selected = true;
-                chatModelSelect.appendChild(option);
-            } else {
-                chatModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
-            }
-        }
-        
-        if (drawingModelSelect) {
-            // 获取已配置的绘画模型
-            const drawingConfig = this.config?.ai_services?.drawing;
-            const currentDrawingModel = drawingConfig?.model;
-            
-            if (currentDrawingModel && currentDrawingModel.trim()) {
-                drawingModelSelect.innerHTML = '';
-                const option = document.createElement('option');
-                option.value = currentDrawingModel;
-                option.textContent = currentDrawingModel;
-                option.selected = true;
-                drawingModelSelect.appendChild(option);
-            } else {
-                drawingModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
-            }
-        }
-    }
-
-    // 更新聊天模型选择框
-    updateChatModelSelect(config) {
-        const chatModelSelect = document.getElementById('openai-model');
-        if (!chatModelSelect) return;
-        
-        const configModel = config.model;
-        if (configModel && configModel.trim()) {
-            chatModelSelect.innerHTML = '';
-            const option = document.createElement('option');
-            option.value = configModel;
-            option.textContent = configModel;
-            option.selected = true;
-            chatModelSelect.appendChild(option);
-        } else {
-            chatModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
-        }
-    }
-
-    // 清空模型选择框（但保留已配置的模型）
-    clearModelSelects() {
-        const chatModelSelect = document.getElementById('openai-model');
-        const drawingModelSelect = document.getElementById('drawing-model');
-        
-        if (chatModelSelect) {
-            const currentChatModel = window.current_chat_model;
-            if (currentChatModel && currentChatModel.trim()) {
-                chatModelSelect.innerHTML = '';
-                const option = document.createElement('option');
-                option.value = currentChatModel;
-                option.textContent = currentChatModel;
-                option.selected = true;
-                chatModelSelect.appendChild(option);
-            } else {
-                chatModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
-            }
-        }
-        
-        if (drawingModelSelect) {
-            const drawingConfig = this.config?.ai_services?.drawing;
-            const currentDrawingModel = drawingConfig?.model;
-            
-            if (currentDrawingModel && currentDrawingModel.trim()) {
-                drawingModelSelect.innerHTML = '';
-                const option = document.createElement('option');
-                option.value = currentDrawingModel;
-                option.textContent = currentDrawingModel;
-                option.selected = true;
-                drawingModelSelect.appendChild(option);
-            } else {
-                drawingModelSelect.innerHTML = '<option value="">请先输入 API Key 并点击刷新获取模型列表</option>';
-            }
-        }
-    }
-
     // Render 服务重启功能
     async restartRenderService() {
         const webhookUrl = document.getElementById('render-webhook-url').value.trim();
@@ -1059,7 +675,7 @@ class BotControlPanel {
         button.innerHTML = '<i class="bi bi-cloud-upload"></i> 部署中...';
         
         try {
-            const response = await fetch('/api/koyeb/redeploy', {
+            const response = await this.apiFetch('/api/koyeb/redeploy', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'

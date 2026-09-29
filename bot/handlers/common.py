@@ -4,11 +4,15 @@
 """
 
 import asyncio
+import copy
+import uuid
 
 from loguru import logger
 from telegram import Message, Update
 from telegram.ext import ContextTypes
 
+from config.ai_config import resolve_image_model, resolve_text_model
+from bot.utils.helpers import safe_send_message
 from config.settings import config_manager
 
 
@@ -201,12 +205,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # AI 服务状态
         ai_config = config_manager.get_ai_config()
         status_text += "🤖 **AI 服务：**\n"
-        status_text += (
-            f"• 对话模型: {ai_config.get('openai', {}).get('model', 'N/A')}\n"
-        )
-        status_text += (
-            f"• 绘画模型: {ai_config.get('drawing', {}).get('model', 'N/A')}\n\n"
-        )
+        for role, label in (("chat", "聊天模型"), ("task", "任务模型"), ("image", "绘图模型")):
+            try:
+                _, model = resolve_image_model(ai_config) if role == "image" else resolve_text_model(ai_config, role)
+                model_name = model["model"]
+            except ValueError:
+                model_name = "未配置"
+            status_text += f"• {label}: {model_name}\n"
+        status_text += f"• MCP: {'已启用' if ai_config.get('mcp', {}).get('enabled') else '已关闭'}\n\n"
 
         # 管理员信息
         if config_manager.is_admin(user.id):
@@ -220,7 +226,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"\n⏰ **查询时间：** {message.date.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        await message.reply_text(status_text, parse_mode="MarkdownV2")
+        await safe_send_message(message, status_text, parse_mode="MarkdownV2")
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /status 命令")
 
@@ -280,7 +286,7 @@ async def list_models_command(
         models_text += f"\n💡 当前使用模型: **{current_model}**"
         models_text += "\n\n使用 `/switch_model <模型名称>` 来切换模型。"
 
-        await message.reply_text(models_text, parse_mode="MarkdownV2")
+        await safe_send_message(message, models_text, parse_mode="MarkdownV2")
 
         logger.info(f"管理员 {user.id} ({user.username}) 查看了模型列表")
 
@@ -327,28 +333,13 @@ async def switch_model_command(
             await message.reply_text("❌ AI服务未初始化。")
             return
 
-        # 获取可用模型列表进行验证
-        available_models = await ai_service.get_available_models()
-
-        if not available_models:
-            await message.reply_text(
-                "❌ 无法获取可用模型列表，请检查API配置或网络连接。"
-            )
-            return
-
-        # 验证用户提供的模型名称是否有效
-        if new_model_name not in available_models:
-            await message.reply_text(
-                f"❌ 模型 '{new_model_name}' 不在可用列表中。\n\n使用 `/models` 查看可用模型列表。"
-            )
-            return
-
-        # 获取当前活动配置
-        active_config = config_manager.get_active_openai_config()
-        if not active_config:
-            await message.reply_text("❌ 没有找到活动的AI配置。")
-            return
-
+        # 允许代理自定义模型名；优先选择已经保存的独立模型配置。
+        ai_config = config_manager.get_ai_config()
+        _, active_config = resolve_text_model(ai_config, "chat")
+        selected = next((item for item in ai_config["text"]["models"] if item["id"] == new_model_name), None)
+        if selected is None:
+            selected = next((item for item in ai_config["text"]["models"]
+                             if item["model"] == new_model_name and item["provider_id"] == active_config["provider_id"]), None)
         current_model = active_config.get("model", "")
 
         # 检查是否已经是当前模型
@@ -358,30 +349,23 @@ async def switch_model_command(
             )
             return
 
-        # 获取当前活动配置的索引
-        active_index = config_manager.get("ai_services.active_openai_config_index", 0)
+        if selected is None:
+            selected = copy.deepcopy(active_config)
+            selected.update(id=uuid.uuid4().hex, name=new_model_name, model=new_model_name, parameters={})
+            ai_config["text"]["models"].append(selected)
+        ai_config["text"]["chat_model_id"] = selected["id"]
+        persisted = config_manager.update_ai_config(ai_config)
+        await ai_service.reload_config()
 
-        # 构造配置路径并更新模型名称
-        openai_configs = config_manager.get("ai_services.openai_configs", [])
-        active_openai_config = config_manager.get_active_openai_config()
-        active_openai_config["model"] = new_model_name
+        success_text = "✅ 模型切换成功！\n\n"
+        success_text += f"聊天模型: {selected['model']}\n"
+        success_text += "独立任务和绘图模型未改变。\n"
+        if not persisted:
+            success_text += "⚠️ 仅内存生效，Redis 未保存。"
 
-        # 更新配置
-        openai_configs[active_index] = active_openai_config
-        config_manager.update_setting("ai_services.openai_configs", openai_configs)
+        await message.reply_text(success_text)
 
-        # 重新加载AI服务配置
-        ai_service.reload_config()
-
-        success_text = "✅ **模型切换成功！**\n\n"
-        success_text += f"🤖 **新模型:** {new_model_name}\n"
-        success_text += f"📊 **配置索引:** {active_index}"
-
-        await message.reply_text(success_text, parse_mode="MarkdownV2")
-
-        logger.info(
-            f"管理员 {user.id} ({user.username}) 将AI模型切换到: {new_model_name} (配置索引: {active_index})"
-        )
+        logger.info(f"管理员 {user.id} 切换了聊天模型配置")
 
     except Exception as e:
         logger.error(f"处理 /switch_model 命令时出错: {e}")

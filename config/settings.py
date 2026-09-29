@@ -3,8 +3,16 @@ import os
 import secrets
 import sys
 import threading
+from copy import deepcopy
 from typing import Any, Dict
 import certifi
+
+from config.ai_config import (
+    merge_ai_secrets,
+    normalize_ai_config,
+    resolve_text_model,
+    validate_ai_config,
+)
 
 # 启用 Windows 终端颜色支持
 if sys.platform == "win32":
@@ -144,16 +152,52 @@ class ConfigManager:
             except json.JSONDecodeError as exc:
                 logger.warning(f"OPENAI_CONFIGS_JSON 解析失败: {exc}，已回退到默认配置")
 
-        return [
-            {
-                "name": "默认配置",
-                "api_key": os.getenv("OPENAI_API_KEY", ""),
-                "api_base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
-                "model": os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
-                "max_tokens": self._env_int("OPENAI_MAX_TOKENS", 1000),
-                "temperature": self._env_float("OPENAI_TEMPERATURE", 0.7),
+        entry = {
+            "name": "默认配置",
+            "api_key": os.getenv("OPENAI_API_KEY", ""),
+            "api_base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
+            "model": os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
+        }
+        # Omitted tuning knobs must remain omitted, including during migration.
+        for env_name, field, convert in (
+            ("OPENAI_MAX_TOKENS", "max_tokens", int),
+            ("OPENAI_TEMPERATURE", "temperature", float),
+        ):
+            raw = os.getenv(env_name, "").strip()
+            if raw:
+                try:
+                    entry[field] = convert(raw)
+                except ValueError:
+                    logger.warning(f"环境变量 {env_name} 格式无效，已忽略")
+        return [entry]
+
+    def _load_ai_config_from_env(self) -> Dict[str, Any]:
+        """AI_SERVICES_JSON supersedes legacy AI variables, not saved Redis edits."""
+        search = {
+            "enabled": self._env_bool("SEARCH_ENABLED", True),
+            "max_results": self._env_int("SEARCH_MAX_RESULTS", 5),
+        }
+        raw = os.getenv("AI_SERVICES_JSON", "").strip()
+        if raw:
+            try:
+                value = json.loads(raw)
+            except (TypeError, ValueError):
+                raise ValueError("AI_SERVICES_JSON: must contain a valid JSON object") from None
+            if not isinstance(value, dict):
+                raise ValueError("AI_SERVICES_JSON: must contain a JSON object")
+            value.setdefault("search", search)
+        else:
+            value = {
+                "openai_configs": self._load_openai_configs(),
+                "active_openai_config_index": 0,
+                "drawing": {
+                    "model": os.getenv("DRAWING_MODEL", "dall-e-3"),
+                    "size": os.getenv("DRAWING_SIZE", "1024x1024"),
+                    "quality": os.getenv("DRAWING_QUALITY", "standard"),
+                },
+                "search": search,
             }
-        ]
+        return validate_ai_config(normalize_ai_config(value))
 
     def load_config(self) -> None:
         """从 Redis 缓存或环境变量加载配置"""
@@ -188,32 +232,45 @@ class ConfigManager:
             # 使用固定的键名获取配置
             config_data = self.redis_client.get("app_config")
             if config_data:
+                if isinstance(config_data, bytes):
+                    config_data = config_data.decode("utf-8")
+                candidate = json.loads(config_data)
+                if not isinstance(candidate, dict):
+                    raise ValueError("configuration: must be an object")
+                candidate["ai_services"] = validate_ai_config(
+                    normalize_ai_config(candidate.get("ai_services", {}))
+                )
                 with self._lock:
-                    # 确保 config_data 是字符串类型
-                    if isinstance(config_data, bytes):
-                        config_data = config_data.decode("utf-8")
-                    elif not isinstance(config_data, str):
-                        config_data = str(config_data)
-                    self.config = json.loads(config_data)
+                    self.config = candidate
                 return True
             return False
-        except Exception as e:
-            logger.warning(f"从 Redis 加载配置失败: {e}")
+        except Exception:
+            logger.warning("从 Redis 加载配置失败，将使用环境变量")
             return False
 
-    def save_config_to_redis(self) -> None:
-        """将当前配置保存到 Redis"""
+    def _save_snapshot_to_redis(self, snapshot: Dict[str, Any]) -> bool:
+        """Called under the configuration lock to keep persisted writes ordered."""
+        if self.redis_client is None:
+            logger.warning("Redis 连接不可用，配置仅在内存中更新")
+            return False
         try:
-            # 确保 Redis 客户端已初始化
-            if self.redis_client is None:
-                logger.warning("Redis 客户端未初始化，无法保存配置")
-                return
-
-            config_json = json.dumps(self.config, ensure_ascii=False)
-            self.redis_client.set("app_config", config_json)
+            saved = bool(self.redis_client.set(
+                "app_config", json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
+            ))
+        except Exception:
+            # Redis exceptions may include a URL/password: never echo them here.
+            logger.warning("保存配置到 Redis 失败，配置仅在内存中更新")
+            return False
+        if saved:
             logger.info("配置已同步到 Redis 缓存")
-        except Exception as e:
-            logger.warning(f"保存配置到 Redis 失败: {e}")
+        else:
+            logger.warning("Redis 未确认保存，配置仅在内存中更新")
+        return saved
+
+    def save_config_to_redis(self) -> bool:
+        """Return actual persistence success (False for memory-only operation)."""
+        with self._lock:
+            return self._save_snapshot_to_redis(self.config)
 
     def _load_config_from_env(self) -> None:
         """从环境变量加载配置"""
@@ -226,7 +283,7 @@ class ConfigManager:
 
         with self._lock:
             # 构建配置字典
-            self.config = {
+            candidate = {
                 "bot_info": {
                     "name": os.getenv("BOT_NAME", "小蜗AI助手"),
                     "username": os.getenv("BOT_USERNAME", "snaily_ai_bot"),
@@ -243,19 +300,7 @@ class ConfigManager:
                         if x.lstrip("-").isdigit()
                     ],
                 },
-                "ai_services": {
-                    "openai_configs": self._load_openai_configs(),
-                    "active_openai_config_index": 0,
-                    "drawing": {
-                        "model": os.getenv("DRAWING_MODEL", "dall-e-3"),
-                        "size": os.getenv("DRAWING_SIZE", "1024x1024"),
-                        "quality": os.getenv("DRAWING_QUALITY", "standard"),
-                    },
-                    "search": {
-                        "enabled": self._env_bool("SEARCH_ENABLED", True),
-                        "max_results": self._env_int("SEARCH_MAX_RESULTS", 5),
-                    },
-                },
+                "ai_services": self._load_ai_config_from_env(),
                 "features": {
                     "welcome_message": {
                         "enabled": self._env_bool("WELCOME_MESSAGE_ENABLED", True),
@@ -323,6 +368,7 @@ class ConfigManager:
                 },
             }
 
+            self.config = candidate
             logger.info("配置从环境变量加载成功")
 
     def _get_secret_key(self) -> str:
@@ -354,8 +400,8 @@ class ConfigManager:
 
             # 将正确的配置保存到Redis，覆盖可能被污染的缓存
             if self.redis_client:
-                self.save_config_to_redis()
-                logger.info("配置已从环境变量重新加载并同步到Redis")
+                if self.save_config_to_redis():
+                    logger.info("配置已从环境变量重新加载并同步到Redis")
             else:
                 logger.info("配置已从环境变量重新加载")
 
@@ -372,24 +418,15 @@ class ConfigManager:
             try:
                 for k in keys:
                     value = value[k]
-                return value
+                return deepcopy(value)
             except (KeyError, TypeError):
-                return default
+                return deepcopy(default)
 
     def set(self, key: str, value: Any) -> None:
-        """设置配置值，支持点号分隔的嵌套键"""
+        """Validate an isolated candidate even for memory-only setters."""
         with self._lock:
-            keys = key.split(".")
-            config = self.config
-
-            # 导航到最后一级的父级
-            for k in keys[:-1]:
-                if k not in config:
-                    config[k] = {}
-                config = config[k]
-
-            # 设置值
-            config[keys[-1]] = value
+            candidate = self._candidate_updates({key: value})
+            self.config = candidate
 
     def get_telegram_config(self) -> Dict[str, Any]:
         """获取 Telegram 相关配置"""
@@ -419,12 +456,16 @@ class ConfigManager:
         return token
 
     def get_active_openai_config(self) -> Dict[str, Any]:
-        """获取当前活动的 OpenAI 配置"""
-        configs = self.get("ai_services.openai_configs", [])
-        index = self.get("ai_services.active_openai_config_index", 0)
-        if configs and 0 <= index < len(configs):
-            return configs[index]
-        return {}
+        """Compatibility view of the chat selection; no separate legacy state."""
+        try:
+            provider, model = resolve_text_model(self.get_ai_config())
+        except ValueError:
+            return {}
+        result = deepcopy(provider)
+        result.update(model=model["model"], name=model["name"], api_type=model["api_type"])
+        for name, value in model["parameters"].items():
+            result[model["token_limit_field"] if name == "max_output_tokens" else name] = value
+        return result
 
     def get_openai_api_key(self) -> str:
         """获取 OpenAI API Key"""
@@ -439,74 +480,127 @@ class ConfigManager:
         admin_ids = self.get("telegram.admin_user_ids", [])
         return user_id in admin_ids
 
-    def save_config(self, updated_config: Dict[str, Any]) -> None:
-        """保存配置更新，同步到内存和 Redis
+    @staticmethod
+    def _assign_path(candidate: Dict[str, Any], path: str, value: Any) -> None:
+        if not isinstance(path, str) or not path or any(not key for key in path.split(".")):
+            raise ValueError("configuration.path: must be a nonempty dotted path")
+        keys = path.split(".")
+        target = candidate
+        for key in keys[:-1]:
+            if isinstance(target, dict):
+                target = target.setdefault(key, {})
+            elif isinstance(target, list) and key.isdecimal() and int(key) < len(target):
+                target = target[int(key)]
+            else:
+                raise ValueError("configuration.path: does not reference an object")
+        if isinstance(target, dict):
+            target[keys[-1]] = deepcopy(value)
+        elif isinstance(target, list) and keys[-1].isdecimal() and int(keys[-1]) < len(target):
+            target[int(keys[-1])] = deepcopy(value)
+        else:
+            raise ValueError("configuration.path: does not reference a writable field")
 
-        Args:
-            updated_config: 更新后的完整配置字典或部分配置更新
+    @staticmethod
+    def _validate_chat(chat: Dict[str, Any]) -> None:
+        if not isinstance(chat, dict):
+            raise ValueError("features.chat: must be an object")
+        allowed = {
+            "enabled", "system_prompt", "history_enabled", "history_max_length",
+            "auto_reply_private", "short_message_threshold",
+        }
+        if chat.keys() - allowed:
+            raise ValueError("features.chat: contains an unsupported field")
+        for name, value in chat.items():
+            if name in {"enabled", "history_enabled", "auto_reply_private"}:
+                if type(value) is not bool:
+                    raise ValueError("features.chat: flags must be booleans")
+            elif name == "system_prompt":
+                if not isinstance(value, str):
+                    raise ValueError("features.chat.system_prompt: must be a string")
+            elif type(value) is not int or value < 1:
+                raise ValueError("features.chat: limits must be positive integers")
+
+    @staticmethod
+    def _validate_drawing_limit(limit: Any) -> None:
+        if type(limit) is not int or limit < 0:
+            raise ValueError("features.drawing.daily_limit: must be a nonnegative integer")
+
+    def _validate_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+        incoming = candidate.get("ai_services", {})
+        if not isinstance(incoming, dict):
+            raise ValueError("ai_services: must be an object")
+        current = self.config.get("ai_services", {})
+        if current.get("schema_version") == 2:
+            if incoming.get("schema_version", 2) != 2 or any(
+                name in incoming for name in ("openai", "openai_configs", "active_openai_config_index")
+            ):
+                raise ValueError("ai_services: legacy fields cannot be updated after migration")
+        candidate["ai_services"] = validate_ai_config(merge_ai_secrets(current, incoming))
+        return candidate
+
+    def _candidate_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(updates, dict):
+            raise ValueError("configuration.updates: must be an object")
+        candidate = deepcopy(self.config)
+        for key, value in updates.items():
+            self._assign_path(candidate, key, value)
+        return self._validate_candidate(candidate)
+
+    def apply_updates(self, updates: Dict[str, Any]) -> bool:
+        """Atomically apply dotted/root updates; return actual Redis persistence.
+
+        Validation failure leaves memory and Redis untouched. A Redis failure
+        leaves the complete validated snapshot in memory and returns False.
         """
-        try:
-            with self._lock:
-                # 更新内存中的配置
-                if isinstance(updated_config, dict):
-                    # 如果是完整的配置字典，直接替换
-                    if "bot_info" in updated_config and "telegram" in updated_config:
-                        self.config = updated_config
-                    else:
-                        # 如果是部分更新，递归合并到现有配置
-                        self._merge_config(self.config, updated_config)
+        with self._lock:
+            candidate = self._candidate_updates(updates)
+            self.config = candidate
+            return self._save_snapshot_to_redis(candidate)
 
-                # 同步到 Redis
-                if self.redis_client:
-                    self.save_config_to_redis()
-                    logger.info("配置已更新并同步到 Redis")
-                else:
-                    logger.warning("Redis 连接不可用，配置仅在内存中更新")
+    def update_ai_config(
+        self, incoming: Dict[str, Any], chat: Dict[str, Any] = None,
+        drawing_daily_limit: int = None,
+    ) -> bool:
+        """Save AI settings and the explicitly supported feature fields together."""
+        with self._lock:
+            candidate = deepcopy(self.config)
+            candidate["ai_services"] = deepcopy(incoming)
+            if chat is not None:
+                self._validate_chat(chat)
+                target = candidate.setdefault("features", {}).setdefault("chat", {})
+                target.update(deepcopy(chat))
+            if drawing_daily_limit is not None:
+                self._validate_drawing_limit(drawing_daily_limit)
+                candidate.setdefault("features", {}).setdefault("drawing", {})["daily_limit"] = drawing_daily_limit
+            self._validate_candidate(candidate)
+            self.config = candidate
+            return self._save_snapshot_to_redis(candidate)
 
-        except Exception as e:
-            logger.error(f"保存配置失败: {e}")
-            raise
+    def save_config(self, updated_config: Dict[str, Any]) -> bool:
+        """Save full or partial config without bypassing AI validation/secrets."""
+        if not isinstance(updated_config, dict):
+            raise ValueError("configuration: must be an object")
+        with self._lock:
+            if "bot_info" in updated_config and "telegram" in updated_config:
+                candidate = deepcopy(updated_config)
+            else:
+                candidate = deepcopy(self.config)
+                self._merge_config(candidate, updated_config)
+            self._validate_candidate(candidate)
+            self.config = candidate
+            return self._save_snapshot_to_redis(candidate)
 
     def _merge_config(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
-        """递归合并配置字典
-
-        Args:
-            target: 目标配置字典（会被修改）
-            source: 源配置字典
-        """
+        """Merge non-dotted partial updates into an independent candidate."""
         for key, value in source.items():
-            if (
-                key in target
-                and isinstance(target[key], dict)
-                and isinstance(value, dict)
-            ):
-                # 递归合并嵌套字典
+            if key in target and isinstance(target[key], dict) and isinstance(value, dict):
                 self._merge_config(target[key], value)
             else:
-                # 直接设置值
-                target[key] = value
+                target[key] = deepcopy(value)
 
-    def update_setting(self, key: str, value: Any) -> None:
-        """更新单个配置项并同步到 Redis
-
-        Args:
-            key: 配置键，支持点号分隔的嵌套键（如 'ai_services.openai.model'）
-            value: 配置值
-        """
-        try:
-            # 使用现有的 set 方法更新配置
-            self.set(key, value)
-
-            # 同步到 Redis
-            if self.redis_client:
-                self.save_config_to_redis()
-                logger.info(f"配置项 '{key}' 已更新并同步到 Redis")
-            else:
-                logger.warning(f"Redis 连接不可用，配置项 '{key}' 仅在内存中更新")
-
-        except Exception as e:
-            logger.error(f"更新配置项 '{key}' 失败: {e}")
-            raise
+    def update_setting(self, key: str, value: Any) -> bool:
+        """Update one setting using the same atomic validation path."""
+        return self.apply_updates({key: value})
 
 
 # 全局配置管理器实例

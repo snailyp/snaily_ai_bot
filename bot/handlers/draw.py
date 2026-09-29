@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.services.ai_services import ai_services
+from bot.utils.helpers import safe_send_photo
 from config.settings import config_manager
 
 
@@ -60,18 +61,15 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
         # 调用 AI 绘画服务
-        image_url = await ai_services.generate_image(prompt, user.id)
+        image = await ai_services.generate_image(prompt, user.id)
 
-        if image_url:
-            # 删除"正在绘制"消息
-            await drawing_message.delete()
-
-            # 发送图片
-            caption = f"🎨 **AI 绘画作品**\n\n📝 **描述：** {prompt}\n👤 **创作者：** {user.first_name}"
-
-            await message.reply_photo(
-                photo=image_url, caption=caption, parse_mode="MarkdownV2"
+        if image:
+            caption = f"🎨 AI 绘画作品\n\n📝 描述：{prompt[:800]}\n👤 创作者：{user.first_name}"
+            await safe_send_photo(
+                message, photo=image.data if image.data is not None else image.url,
+                caption=caption, parse_mode=None,
             )
+            await drawing_message.delete()
 
             logger.info(
                 f"用户 {user.id} ({user.username}) 成功生成图片: {prompt[:50]}..."

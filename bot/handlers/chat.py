@@ -128,7 +128,7 @@ async def _chat_with_ai(update: Update, text: str) -> None:
 
         # 调用 AI 服务
         ai_response = await ai_services.chat_completion(
-            history=updated_history, user_id=user.id
+            history=updated_history, user_id=user.id, chat_id=chat.id
         )
 
         if ai_response:

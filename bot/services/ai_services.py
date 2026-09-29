@@ -1,6 +1,5 @@
 """
-AI 服务模块
-封装对 OpenAI 等 AI API 的调用
+AI 功能入口。模型连接、文本协议、绘图和 MCP 分别由独立模块处理。
 """
 
 import os
@@ -11,94 +10,43 @@ import openai
 from loguru import logger
 from md2tgmd import escape
 
+from config.ai_config import resolve_image_model, resolve_text_model
 from config.settings import config_manager
+from bot.services.image_generation import ImageGenerator, ImageResult
+from bot.services.mcp_client import MCPClientManager
+from bot.services.text_generation import TextGenerator, client_options
 
 
 class AIServices:
-    """AI 服务管理器"""
+    """为聊天及后台任务提供统一入口，不暴露提供商协议。"""
 
-    def __init__(self):
-        self.openai_client = None
-        self.active_config_cache = None
-        self._setup_openai()
+    def __init__(self, manager=None, text_generator=None, image_generator=None, mcp=None):
+        self.config_manager = manager or config_manager
+        self.text_generator = text_generator or TextGenerator()
+        self.image_generator = image_generator or ImageGenerator()
+        self.mcp = mcp or MCPClientManager(
+            lambda: self.config_manager.get_ai_config().get("mcp", {}),
+            self.config_manager.is_admin,
+        )
 
-    def _setup_openai(self):
-        """设置 OpenAI 客户端"""
+    async def reload_config(self):
+        await self.mcp.reconcile()
+
+    async def aclose(self):
         try:
-            active_config = config_manager.get_active_openai_config()
-
-            # 检查配置是否有变化，如果没有变化且客户端已存在，则直接返回
-            if (
-                self.openai_client is not None
-                and self.active_config_cache is not None
-                and self.active_config_cache == active_config
-            ):
-                return
-
-            if not active_config:
-                logger.error("没有找到活动的 OpenAI 配置")
-                self.openai_client = None
-                self.active_config_cache = None
-                return
-
-            api_key = active_config.get("api_key")
-            base_url = active_config.get("api_base_url", "https://api.openai.com/v1")
-
-            if not api_key:
-                logger.error("活动的 OpenAI 配置中缺少 API Key")
-                self.openai_client = None
-                self.active_config_cache = None
-                return
-
-            self.openai_client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
-            self.active_config_cache = active_config
-            logger.info(
-                f"OpenAI 客户端初始化或更新成功，使用配置: {active_config.get('name', '未命名')}，base_url: {base_url}"
-            )
-        except Exception as e:
-            logger.error(f"OpenAI 客户端初始化失败: {e}")
-            self.openai_client = None
-            self.active_config_cache = None
-
-    def reload_config(self):
-        """重新加载配置并重新初始化OpenAI客户端"""
-        try:
-            logger.info("重新加载AI服务配置...")
-            self._setup_openai()
-            logger.info("AI服务配置重新加载完成")
-        except Exception as e:
-            logger.error(f"重新加载AI服务配置失败: {e}")
+            await self.mcp.aclose()
+        finally:
+            await self.text_generator.aclose()
+            await self.image_generator.aclose()
 
     async def get_available_models(self) -> List[str]:
-        """
-        获取当前配置可用的模型列表
-
-        Returns:
-            模型ID列表，失败时返回空列表
-        """
         try:
-            self._setup_openai()
-            if not self.openai_client:
-                logger.error("OpenAI 客户端未初始化，无法获取模型列表")
-                return []
-
-            # 调用 OpenAI API 获取模型列表
-            models_response = await self.openai_client.models.list()
-
-            # 提取模型ID列表
-            model_ids = [model.id for model in models_response.data]
-
-            logger.info(f"成功获取到 {len(model_ids)} 个可用模型")
-            return model_ids
-
-        except openai.AuthenticationError:
-            logger.error("OpenAI API 认证失败，无法获取模型列表")
-            return []
-        except openai.RateLimitError:
-            logger.warning("OpenAI API 速率限制，无法获取模型列表")
-            return []
-        except Exception as e:
-            logger.error(f"获取模型列表失败: {e}")
+            provider, _ = resolve_text_model(self.config_manager.get_ai_config(), "chat")
+            async with openai.AsyncOpenAI(**client_options(provider)) as client:
+                response = await client.models.list()
+                return sorted(model.id for model in response.data)
+        except Exception as exc:
+            logger.warning(f"获取模型列表失败: {type(exc).__name__}")
             return []
 
     async def chat_completion(
@@ -106,338 +54,138 @@ class AIServices:
         history: List[Dict[str, Any]],
         user_id: Optional[int] = None,
         enable_md2tg: bool = True,
+        *,
+        role: str = "chat",
+        chat_id: Optional[int] = None,
+        system_prompt: Optional[str] = None,
     ) -> Optional[str]:
-        """
-        AI 对话完成
-
-        Args:
-            history: 对话历史列表，格式 [{"role": "user", "content": "消息内容"}]
-            user_id: 用户ID，用于日志记录
-
-        Returns:
-            AI 回复内容，失败时返回 None
-        """
         try:
-            self._setup_openai()
-            if not self.openai_client:
-                return "抱歉，AI 服务暂时不可用。"
+            ai_config = self.config_manager.get_ai_config()
+            provider, model = resolve_text_model(ai_config, role)
+            if system_prompt is None:
+                system_prompt = self.config_manager.get(
+                    "features.chat.system_prompt",
+                    "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
+                ) if role == "chat" else "请根据用户提供的资料和任务要求，用中文准确、简洁地回答。"
+            messages = [{"role": "system", "content": system_prompt}] + history
+            tools = []
+            if role == "chat" and model.get("supports_tools") and user_id is not None:
+                tools = await self.mcp.list_tools(user_id, chat_id)
 
-            # 获取配置
-            openai_config = config_manager.get_active_openai_config()
-            if not openai_config:
-                return "抱歉，AI 服务配置不正确。"
+            async def call_tool(name, arguments):
+                return await self.mcp.call_tool(name, arguments, user_id, chat_id)
 
-            model = openai_config.get("model", "gpt-3.5-turbo")
-            max_tokens = openai_config.get("max_tokens", 1000)
-            if not isinstance(max_tokens, int) or max_tokens <= 0:
-                max_tokens = 1000
-            temperature = openai_config.get("temperature")
-            if temperature is None:
-                temperature = 0.7
-
-            # 添加系统提示到历史记录的最前面
-            system_prompt = config_manager.get(
-                "features.chat.system_prompt",
-                "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
+            reply = await self.text_generator.complete(
+                provider, model, messages, tools=tools, tool_caller=call_tool,
+                limits=ai_config.get("mcp", {}),
             )
-
-            full_messages = [{"role": "system", "content": system_prompt}] + history
-
-            # 调用 OpenAI API
-            response = await self.openai_client.chat.completions.create(
-                model=model,
-                messages=full_messages,  # type: ignore
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-
-            content = response.choices[0].message.content
-            reply = content.strip() if content is not None else ""
-
-            if enable_md2tg:
-                # 转换为 Telegram MarkdownV2 安全格式
-                safe_reply = escape(reply)
-                logger.info(
-                    f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}, 转换后长度: {len(safe_reply)}"
-                )
-                logger.info(f"原始回复: {reply}")
-                logger.info(f"转换后回复: {safe_reply}")
-            else:
-                safe_reply = reply
-                logger.info(
-                    f"AI 对话完成 - 用户: {user_id}, 模型: {model}, 回复长度: {len(reply)}"
-                )
-            return safe_reply
-
-        except openai.RateLimitError:
-            logger.warning(f"OpenAI API 速率限制 - 用户: {user_id}")
-            return "抱歉，当前请求过多，请稍后再试。"
-        except openai.AuthenticationError:
-            logger.error("OpenAI API 认证失败")
-            self._setup_openai()
-            return "抱歉，AI 服务配置有误。"
-        except Exception as e:
-            logger.error(f"AI 对话失败 - 用户: {user_id}, 错误: {e}")
-            return "抱歉，AI 服务暂时出现问题，请稍后再试。"
-
-    async def generate_image(
-        self, prompt: str, user_id: Optional[int] = None
-    ) -> Optional[str]:
-        """
-        AI 图片生成
-
-        Args:
-            prompt: 图片描述
-            user_id: 用户ID，用于日志记录
-
-        Returns:
-            图片URL，失败时返回 None
-        """
-        try:
-            self._setup_openai()
-            if not self.openai_client:
+            logger.info(f"AI 生成完成 - 用途: {role}, 用户: {user_id}, 回复长度: {len(reply)}")
+            return escape(reply) if enable_md2tg else reply
+        except Exception as exc:
+            logger.warning(f"AI 生成失败 - 用途: {role}, 错误类型: {type(exc).__name__}")
+            # 后台摘要不能把错误提示当成成功摘要推送出去。
+            if role != "chat":
                 return None
+            message = "抱歉，AI 服务暂时不可用，请检查模型配置或稍后重试。"
+            return escape(message) if enable_md2tg else message
 
-            # 获取配置
-            ai_config = config_manager.get_ai_config()
-            drawing_config = ai_config.get("drawing", {})
-
-            model = drawing_config.get("model", "dall-e-3")
-            size = drawing_config.get("size", "1024x1024")
-            quality = drawing_config.get("quality", "standard")
-
-            # 调用 OpenAI DALL-E API
-            response = await self.openai_client.images.generate(
-                model=model, prompt=prompt, size=size, quality=quality, n=1
-            )
-
-            image_url = response.data[0].url
-
-            logger.info(
-                f"AI 图片生成成功 - 用户: {user_id}, 模型: {model}, 提示: {prompt[:50]}..."
-            )
-            return image_url
-
-        except openai.RateLimitError:
-            logger.warning(f"OpenAI API 速率限制 - 用户: {user_id}")
-            return None
-        except openai.AuthenticationError:
-            logger.error("OpenAI API 认证失败")
-            self._setup_openai()
-            return None
-        except Exception as e:
-            logger.error(f"AI 图片生成失败 - 用户: {user_id}, 错误: {e}")
-            return None
-
-    async def search_web(
-        self, query: str, user_id: Optional[int] = None
-    ) -> Optional[str]:
-        """
-        联网搜索功能
-
-        Args:
-            query: 搜索查询
-            user_id: 用户ID，用于日志记录
-
-        Returns:
-            搜索结果摘要，失败时返回 None
-        """
+    async def generate_image(self, prompt: str, user_id: Optional[int] = None) -> Optional[ImageResult]:
         try:
-            # 这里使用一个简单的搜索实现
-            # 在实际项目中，你可能想要集成 Google Search API, Bing API 等
-
-            # 使用 AI 来模拟搜索结果（临时方案）
-            search_prompt = f"""
-            用户搜索查询: "{query}"
-            
-            请基于你的知识库提供相关信息。如果这是一个需要实时信息的查询（如天气、新闻、股价等），
-            请说明你无法提供实时信息，并建议用户查看相关官方网站。
-            
-            请用简洁明了的中文回答，包含最相关的信息。
-            """
-
-            messages = [{"role": "user", "content": search_prompt}]
-            result = await self.chat_completion(messages, user_id)
-
-            if result:
-                logger.info(f"搜索完成 - 用户: {user_id}, 查询: {query}")
-                search_result = f"🔍 **搜索结果：{query}**\n\n{result}\n\n💡 *注意：以上信息基于AI知识库，如需最新信息请查看官方来源。*"
-                return search_result
-
+            provider, model = resolve_image_model(self.config_manager.get_ai_config())
+            result = await self.image_generator.generate(provider, model, prompt)
+            logger.info(f"AI 图片生成成功 - 用户: {user_id}")
+            return result
+        except Exception as exc:
+            logger.warning(f"AI 图片生成失败 - 用户: {user_id}, 错误类型: {type(exc).__name__}")
             return None
 
-        except Exception as e:
-            logger.error(f"搜索失败 - 用户: {user_id}, 查询: {query}, 错误: {e}")
-            return None
-
-    async def summarize_messages(
-        self, messages: List[str], chat_title: str = "群聊"
-    ) -> Optional[str]:
+    async def search_web(self, query: str, user_id: Optional[int] = None) -> Optional[str]:
+        # 保留现有知识库摘要行为；未配置真实搜索工具时不声称已联网检索。
+        search_prompt = f"""
+        用户搜索查询: "{query}"
+        请基于你的知识库提供相关信息。如果这是一个需要实时信息的查询（如天气、新闻、股价等），
+        请说明你无法提供实时信息，并建议用户查看相关官方网站。
+        请用简洁明了的中文回答，包含最相关的信息。
         """
-        总结群聊消息
+        result = await self.chat_completion([{"role": "user", "content": search_prompt}], user_id, role="task")
+        if result:
+            return f"🔍 **搜索结果：{query}**\n\n{result}\n\n💡 *注意：以上信息基于AI知识库，如需最新信息请查看官方来源。*"
+        return None
 
-        Args:
-            messages: 消息列表
-            chat_title: 群聊标题
-
-        Returns:
-            总结内容，失败时返回 None
+    async def summarize_messages(self, messages: List[str], chat_title: str = "群聊") -> Optional[str]:
+        if not messages:
+            return None
+        summary_prompt = self.config_manager.get("features.auto_summary.summary_prompt", "请总结以下群聊对话的主要内容和话题：")
+        messages_text = "\n".join(messages)
+        full_prompt = f"""
+        {summary_prompt}
+        群聊名称: {chat_title}
+        消息数量: {len(messages)}
+        消息内容:
+        {messages_text}
+        请提供一个简洁的总结，包括：
+        1. 主要讨论话题
+        2. 重要信息或决定
+        3. 活跃参与者
+        4. 其他值得注意的内容
+        请用中文回答，保持简洁明了。不要在开头说“好的，这是对该群聊内容的简洁总结：”这类语句，直接给出总结内容即可。
         """
-        try:
-            if not messages:
-                return None
-
-            # 获取总结提示词
-            summary_prompt = config_manager.get(
-                "features.auto_summary.summary_prompt",
-                "请总结以下群聊对话的主要内容和话题：",
-            )
-
-            # 构建总结请求
-            messages_text = "\n".join(messages)
-
-            full_prompt = f"""
-            {summary_prompt}
-            
-            群聊名称: {chat_title}
-            消息数量: {len(messages)}
-            
-            消息内容:
-            {messages_text}
-            
-            请提供一个简洁的总结，包括：
-            1. 主要讨论话题
-            2. 重要信息或决定
-            3. 活跃参与者
-            4. 其他值得注意的内容
-            
-            请用中文回答，保持简洁明了。不要在开头说“好的，这是对该群聊内容的简洁总结：”这类语句，
-            直接给出总结内容即可。
-            """
-
-            chat_messages = [{"role": "user", "content": full_prompt}]
-            summary = await self.chat_completion(chat_messages)
-
-            if summary:
-                logger.info(
-                    f"群聊总结完成 - 群聊: {chat_title}, 消息数: {len(messages)}"
-                )
-                return summary
-
-            return None
-
-        except Exception as e:
-            logger.error(f"群聊总结失败 - 群聊: {chat_title}, 错误: {e}")
-            return None
+        return await self.chat_completion([{"role": "user", "content": full_prompt}], role="task")
 
     async def summarize_hotspot_news(self, content: str) -> Optional[str]:
-        """
-        总结热点新闻
-
-        Args:
-            content: 新闻内容字符串
-
-        Returns:
-            总结内容，失败时返回 None
-        """
-        try:
-            if not content:
-                return None
-
-            prompt = f"""
-            请根据以下内容，总结出核心要点。
-
-            内容：
-            {content}
-
-            要求：
-            1. 直接输出总结内容，不要包含任何额外的引导性或礼貌性用语（例如“好的，这是总结：”）。
-            2. 总结应简洁、清晰、准确。
-            3. 使用中文进行总结。
-            """
-
-            messages = [{"role": "user", "content": prompt}]
-            summary = await self.chat_completion(history=messages, enable_md2tg=False)
-
-            if summary:
-                logger.info("热点新闻总结成功")
-                # 再次清理，确保只返回核心内容
-                cleaned_summary = re.sub(
-                    r"^(好的|当然|这是|以下是)?(,|，)?\s*(对|关于)?.*?的总结(是|如下)?[：:]?\s*",
-                    "",
-                    summary,
-                    flags=re.IGNORECASE,
-                )
-                return cleaned_summary.strip()
-
+        if not content:
             return None
-        except Exception as e:
-            logger.error(f"热点新闻总结失败: {e}")
-            return None
+        prompt = f"""
+        请根据以下内容，总结出核心要点。
+        内容：
+        {content}
+        要求：
+        1. 直接输出总结内容，不要包含任何额外的引导性或礼貌性用语（例如“好的，这是总结：”）。
+        2. 总结应简洁、清晰、准确。
+        3. 使用中文进行总结。
+        """
+        summary = await self.chat_completion(
+            [{"role": "user", "content": prompt}], enable_md2tg=False, role="task",
+        )
+        if summary:
+            return re.sub(r"^(好的|当然|这是|以下是)?(,|，)?\s*(对|关于)?.*?的总结(是|如下)?[：:]?\s*", "", summary, flags=re.IGNORECASE).strip()
+        return None
 
 
-# 全局 AI 服务实例
+# 构造实例不创建网络连接；客户端只在实际请求时建立。
 ai_services = AIServices()
 
 
 async def get_rag_answer(question: str) -> str:
-    """
-    使用 RAG 模型检索答案。
-    此实现会读取 'docs' 目录中的所有 markdown 文档，
-    将其与用户的问题结合，然后发送给 AI 模型。
-    """
-    logger.info(f"RAG 服务被调用，问题: {question}")
+    """读取项目文档，使用任务模型进行知识库问答。"""
     try:
-        # 1. 读取所有 docs 下的 markdown 文件
         docs_path = "docs"
         all_doc_content = []
-        if os.path.exists(docs_path) and os.path.isdir(docs_path):
+        if os.path.isdir(docs_path):
             for filename in os.listdir(docs_path):
                 if filename.endswith(".md"):
-                    filepath = os.path.join(docs_path, filename)
                     try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            all_doc_content.append(f.read())
-                    except Exception as e:
-                        logger.warning(f"无法读取文件 {filepath}: {e}")
-
+                        with open(os.path.join(docs_path, filename), "r", encoding="utf-8") as file:
+                            all_doc_content.append(file.read())
+                    except OSError:
+                        logger.warning("RAG 文档读取失败")
         if not all_doc_content:
-            logger.warning("RAG: 在 docs 目录中没有找到可用的文档。")
             return "抱歉，我没有找到任何可以参考的背景知识来回答你的问题。"
-
-        doc_text = "\n\n---\n\n".join(all_doc_content)
-
-        # 2. 构建 prompt
-        # 移除 doc_text 中所有的 markdown 图片链接 ![alt](url)
-        doc_text_no_images = re.sub(r"!\[.*?\]\(.*?\)", "", doc_text)
-
+        doc_text = re.sub(r"!\[.*?\]\(.*?\)", "", "\n\n---\n\n".join(all_doc_content))
         rag_prompt = f"""
         你是一个智能问答机器人。请根据我提供的背景知识来回答问题。
         如果背景知识中没有相关信息，请明确告知用户你无法根据已知信息回答。
         请不要编造背景知识中不存在的内容。
-
         [背景知识]
-        {doc_text_no_images}
+        {doc_text}
         [/背景知识]
-
         现在，请根据以上背景知识回答我的问题。
-
         [问题]
         {question}
         [/问题]
         """
-
-        # 3. 调用大模型
-        # 注意：这里我们直接调用了全局实例的 chat_completion 方法
-        messages = [{"role": "user", "content": rag_prompt}]
-        answer = await ai_services.chat_completion(messages)
-
-        if not answer:
-            return "抱歉，AI 服务在处理您的问题时遇到了麻烦。"
-
-        logger.info(f"RAG 服务成功回答问题: {question}")
-        return answer
-
-    except Exception as e:
-        logger.error(f"RAG 服务失败，问题 '{question}': {e}")
+        answer = await ai_services.chat_completion([{"role": "user", "content": rag_prompt}], role="task")
+        return answer or "抱歉，AI 服务在处理您的问题时遇到了麻烦。"
+    except Exception as exc:
+        logger.warning(f"RAG 服务失败: {type(exc).__name__}")
         return "抱歉，知识库问答服务暂时不可用。"
