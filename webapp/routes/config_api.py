@@ -3,8 +3,6 @@
 处理配置的获取、更新和重置
 """
 
-import asyncio
-
 from flask import Blueprint, current_app, jsonify, request
 from loguru import logger
 
@@ -12,6 +10,15 @@ from config.settings import config_manager
 
 # 创建配置API蓝图
 bp = Blueprint("config_api", __name__)
+
+
+def _trigger_reschedule():
+    """把配置变更交给机器人自己的事件循环处理。"""
+    bot = getattr(current_app, "bot", None)
+    if not bot or not bot.application:
+        return False
+    request_reschedule = getattr(bot, "request_reschedule", None)
+    return bool(request_reschedule and request_reschedule())
 
 
 @bp.route("/api/config", methods=["GET"])
@@ -51,35 +58,11 @@ def update_config():
         logger.info("配置已通过 Web 面板更新并保存")
 
         # 触发机器人重新调度任务
-        bot = getattr(current_app, "bot", None)
-        if bot and bot.application:
-            try:
-                # 获取当前运行的事件循环
-                loop = asyncio.get_running_loop()
-                asyncio.run_coroutine_threadsafe(bot.reschedule_jobs(), loop)
-                logger.info("已触发机器人定时任务的动态更新")
-                return jsonify(
-                    {"success": True, "message": "配置已保存，定时任务将立即生效"}
-                )
-            except RuntimeError:
-                # 如果没有运行的事件循环，在新线程中运行异步任务
-                import threading
-
-                def reschedule_in_thread():
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(bot.reschedule_jobs())
-                        loop.close()
-                        logger.info("已触发机器人定时任务的动态更新")
-                    except Exception as e:
-                        logger.error(f"重新调度任务时出错: {e}")
-
-                thread = threading.Thread(target=reschedule_in_thread, daemon=True)
-                thread.start()
-                return jsonify(
-                    {"success": True, "message": "配置已保存，定时任务将立即生效"}
-                )
+        if _trigger_reschedule():
+            logger.info("已触发机器人定时任务的动态更新")
+            return jsonify(
+                {"success": True, "message": "配置已保存，定时任务将立即生效"}
+            )
         else:
             logger.warning("未找到 Bot 实例，无法动态更新任务")
             return jsonify(
@@ -100,35 +83,11 @@ def reset_config():
         logger.info("配置已通过 Web 面板重置")
 
         # 触发机器人重新调度任务
-        bot = getattr(current_app, "bot", None)
-        if bot and bot.application:
-            try:
-                # 获取当前运行的事件循环
-                loop = asyncio.get_running_loop()
-                asyncio.run_coroutine_threadsafe(bot.reschedule_jobs(), loop)
-                logger.info("已触发机器人定时任务的动态更新")
-                return jsonify(
-                    {"success": True, "message": "配置已重置，定时任务将立即生效"}
-                )
-            except RuntimeError:
-                # 如果没有运行的事件循环，在新线程中运行异步任务
-                import threading
-
-                def reschedule_in_thread():
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(bot.reschedule_jobs())
-                        loop.close()
-                        logger.info("已触发机器人定时任务的动态更新")
-                    except Exception as e:
-                        logger.error(f"重新调度任务时出错: {e}")
-
-                thread = threading.Thread(target=reschedule_in_thread, daemon=True)
-                thread.start()
-                return jsonify(
-                    {"success": True, "message": "配置已重置，定时任务将立即生效"}
-                )
+        if _trigger_reschedule():
+            logger.info("已触发机器人定时任务的动态更新")
+            return jsonify(
+                {"success": True, "message": "配置已重置，定时任务将立即生效"}
+            )
         else:
             logger.warning("未找到 Bot 实例，无法动态更新任务")
             return jsonify(

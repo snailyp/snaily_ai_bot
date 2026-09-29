@@ -18,6 +18,12 @@ def get_status():
     try:
         features = config_manager.get_features_config()
 
+        try:
+            openai_configured = bool(config_manager.get_openai_api_key())
+        except ValueError:
+            # 未配置 Key 是可展示的运行状态，不应让状态接口返回 500。
+            openai_configured = False
+
         status = {
             "features": {
                 "chat": features.get("chat", {}).get("enabled", False),
@@ -30,7 +36,7 @@ def get_status():
             },
             "config_status": {
                 "bot_token": bool(config_manager.get("telegram.bot_token")),
-                "openai_api_key": bool(config_manager.get_openai_api_key()),
+                "openai_api_key": openai_configured,
             },
         }
 

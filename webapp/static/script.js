@@ -1,4 +1,4 @@
-// Web 控制面板 JavaScript
+// 小蜗控制台：展示层与原有配置接口保持独立。
 
 class BotControlPanel {
     constructor() {
@@ -7,27 +7,138 @@ class BotControlPanel {
     }
 
     init() {
-        this.loadConfig();
+        this.setupNavigation();
         this.setupEventListeners();
         this.setupFormHandlers();
+        this.loadConfig();
         this.startStatusUpdates();
+    }
+
+    setupNavigation() {
+        const pages = {
+            overview: ['系统概览', 'WORKSPACE OVERVIEW', '每一项能力，都在你的掌控之中。'],
+            'ai-config': ['AI 配置', 'AI WORKSPACE', '连接模型，调好属于你的对话与创作体验。'],
+            'welcome-config': ['欢迎消息', 'FIRST IMPRESSIONS', '给每一位新成员，一句恰到好处的问候。'],
+            'summary-config': ['群聊总结', 'CONVERSATION DIGEST', '从热闹的讨论中，留下真正重要的事。'],
+            'history-config': ['历史记录', 'DATA & MEMORY', '管理记录的保留周期，让工作空间保持轻盈。'],
+            'hotspot-config': ['热点推送', 'DAILY DISCOVERY', '你关心的世界，按时抵达你的社群。'],
+            'advanced-config': ['高级与部署', 'SYSTEM SETTINGS', '管理运行偏好与部署操作，请谨慎修改。']
+        };
+        const navigate = (focus = false) => {
+            const requested = location.hash.slice(1);
+            const id = Object.hasOwn(pages, requested) ? requested : 'overview';
+            document.querySelectorAll('.view').forEach(view => {
+                view.hidden = view.id !== id;
+                view.classList.toggle('active', view.id === id);
+            });
+            document.querySelectorAll('[data-view]').forEach(link => {
+                const active = link.dataset.view === id;
+                link.classList.toggle('active', active);
+                if (active) link.setAttribute('aria-current', 'page');
+                else link.removeAttribute('aria-current');
+            });
+            const [title, eyebrow, description] = pages[id];
+            document.getElementById('page-title').replaceChildren(document.createTextNode(title));
+            const dot = document.createElement('span');
+            dot.className = 'title-dot';
+            dot.textContent = '.';
+            document.getElementById('page-title').append(dot);
+            document.getElementById('breadcrumb-title').textContent = title;
+            document.getElementById('page-eyebrow').textContent = eyebrow;
+            document.getElementById('page-description').textContent = description;
+            document.title = `${title} · 小蜗控制台`;
+            this.setNavigationOpen(false);
+            if (focus) {
+                document.getElementById('main-content').focus({ preventScroll: true });
+                window.scrollTo(0, 0);
+            }
+        };
+        window.addEventListener('hashchange', () => navigate(true));
+        // Hash 用来选择工作区，不应在首次打开时跳过页面标题。
+        window.addEventListener('load', () => {
+            requestAnimationFrame(() => window.scrollTo(0, 0));
+        }, { once: true });
+        document.getElementById('menu-button').addEventListener('click', () => {
+            this.setNavigationOpen(!document.getElementById('sidebar').classList.contains('open'));
+        });
+        document.getElementById('nav-backdrop').addEventListener('click', () => this.setNavigationOpen(false));
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && document.getElementById('sidebar').classList.contains('open')) {
+                this.setNavigationOpen(false);
+                document.getElementById('menu-button').focus();
+            }
+        });
+        document.querySelectorAll('[data-view]').forEach(link => {
+            link.addEventListener('click', () => this.setNavigationOpen(false));
+        });
+        window.matchMedia('(max-width: 760px)').addEventListener('change', () => this.setNavigationOpen(false));
+        document.getElementById('retry-config').addEventListener('click', () => this.loadConfig());
+        document.getElementById('refresh-status').addEventListener('click', () => this.updateStatus());
+        document.getElementById('dismiss-toast').addEventListener('click', () => {
+            document.getElementById('notification-toast').classList.remove('show');
+        });
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('input', () => this.markDirty(form));
+            form.addEventListener('change', () => this.markDirty(form));
+        });
+        window.addEventListener('beforeunload', event => {
+            if (document.querySelector('form.dirty')) {
+                event.preventDefault();
+                event.returnValue = '';
+            }
+        });
+        navigate();
+    }
+
+    setNavigationOpen(open) {
+        document.getElementById('sidebar').classList.toggle('open', open);
+        document.getElementById('nav-backdrop').hidden = !open;
+        document.getElementById('menu-button').setAttribute('aria-expanded', String(open));
+        document.body.classList.toggle('nav-open', open);
+        document.getElementById('sidebar').inert = !open && window.matchMedia('(max-width: 760px)').matches;
+    }
+
+    markDirty(form) {
+        form.classList.add('dirty');
+        form.querySelector('.save-state').textContent = '有未保存的修改';
+    }
+
+    markSaved(formId) {
+        const form = document.getElementById(formId);
+        form.classList.remove('dirty');
+        form.querySelector('.save-state').textContent = '✓ 设置已保存';
+    }
+
+    setConnection(state, text) {
+        document.getElementById('connection-status').dataset.state = state;
+        document.getElementById('connection-text').textContent = text;
     }
 
     // 加载配置
     async loadConfig() {
+        const retry = document.getElementById('retry-config');
+        retry.disabled = true;
+        document.getElementById('load-message').textContent = '正在读取工作空间配置…';
         try {
             const response = await fetch('/api/config');
             const data = await response.json();
-            
-            if (data.success) {
-                this.config = data.config;
-                this.updateUI();
-                this.updateStatus();
-            } else {
-                this.showNotification('加载配置失败: ' + data.error, 'error');
+            if (!response.ok || !data.success) throw new Error(data.error || '配置加载失败');
+            this.config = data.config;
+            this.config.ai_services = this.config.ai_services || {};
+            if (!this.config.ai_services.openai_configs?.length) {
+                this.config.ai_services.openai_configs = [{}];
             }
+            this.updateUI();
+            document.getElementById('workspace-content').inert = false;
+            document.getElementById('load-notice').hidden = true;
+            this.updateStatus();
         } catch (error) {
-            this.showNotification('网络错误: ' + error.message, 'error');
+            document.getElementById('load-notice').hidden = false;
+            document.getElementById('load-message').textContent = `无法读取配置：${error.message}。请重试；若登录已过期，请重新登录。`;
+            retry.hidden = false;
+            this.setConnection('error', '配置加载失败');
+        } finally {
+            retry.disabled = false;
         }
     }
 
@@ -92,20 +203,24 @@ class BotControlPanel {
         this.initializeModelSelects();
 
         // 根据当前选中的配置更新表单
+        this.editingConfigIndex = activeIndex;
+        this.updateChatModelSelect(openaiConfigs[activeIndex] || {});
         this.updateOpenAIFormFields(openaiConfigs[activeIndex] || {});
 
         // 绘画配置
         this.setFormValue('drawing-model', drawingConfig.model || 'dall-e-3');
         this.setFormValue('image-size', drawingConfig.size || '1024x1024');
         this.setFormValue('image-quality', drawingConfig.quality || 'standard');
-        this.setFormValue('daily-limit', this.config.features?.drawing?.daily_limit || 10);
+        this.setFormValue('daily-limit', this.config.features?.drawing?.daily_limit ?? 10);
+        document.getElementById('chat-history-enabled').checked = chatConfig.history_enabled ?? true;
+        this.setFormValue('chat-history-max-length', chatConfig.history_max_length ?? 10);
 
         // 聊天功能配置 - 新增的配置项
         const autoReplyPrivateCheckbox = document.getElementById('chat-auto-reply-private');
         if (autoReplyPrivateCheckbox) {
             autoReplyPrivateCheckbox.checked = chatConfig.auto_reply_private || false;
         }
-        this.setFormValue('chat-short-message-threshold', chatConfig.short_message_threshold || 50);
+        this.setFormValue('chat-short-message-threshold', chatConfig.short_message_threshold || 1024);
     }
 
     updateOpenAIFormFields(config) {
@@ -114,11 +229,11 @@ class BotControlPanel {
         this.setFormValue('openai-base-url', config.api_base_url || 'https://api.openai.com/v1');
         this.setFormValue('openai-model', config.model || 'gpt-3.5-turbo');
         this.setFormValue('max-tokens', config.max_tokens || 1000);
-        this.setFormValue('temperature', config.temperature || 0.7);
+        this.setFormValue('temperature', config.temperature ?? 0.7);
         
         const tempValue = document.getElementById('temperature-value');
         if (tempValue) {
-            tempValue.textContent = config.temperature || 0.7;
+            tempValue.textContent = config.temperature ?? 0.7;
         }
     }
 
@@ -144,8 +259,10 @@ class BotControlPanel {
         if (enabledCheckbox) {
             enabledCheckbox.checked = hotspotConfig.enabled || false;
         }
-        this.setFormValue('hotspot-push-interval', hotspotConfig.push_interval_minutes || 60);
+        this.setFormValue('hotspot-push-schedule', hotspotConfig.push_schedule || '09:00');
         this.setFormValue('hotspot-push-chat-id', hotspotConfig.telegram_push_chat_id || '');
+        this.setFormValue('hotspot-sources', (hotspotConfig.sources || []).join(','));
+        this.setFormValue('hotspot-keywords', (hotspotConfig.keywords || []).join(','));
     }
 
     // 更新历史记录设置表单
@@ -181,82 +298,52 @@ class BotControlPanel {
 
     // 更新状态概览
     async updateStatus() {
+        if (this.statusLoading) return;
+        this.statusLoading = true;
+        const button = document.getElementById('refresh-status');
+        this.setButtonLoading(button, true);
         try {
             const response = await fetch('/api/status');
             const data = await response.json();
-            
-            if (data.success) {
-                this.renderStatusOverview(data.status);
-            }
+            if (!response.ok || !data.success) throw new Error(data.error || '状态读取失败');
+            this.renderStatusOverview(data.status);
+            this.setConnection('ready', '控制台已连接');
         } catch (error) {
-            console.error('更新状态失败:', error);
+            this.setConnection('error', '状态更新失败');
+            document.getElementById('status-overview').textContent = '无法读取配置状态，请点击上方刷新状态重试。';
+        } finally {
+            this.statusLoading = false;
+            this.setButtonLoading(button, false);
         }
     }
 
-    // 渲染状态概览
     renderStatusOverview(status) {
         const container = document.getElementById('status-overview');
-        if (!container) return;
-
-        const features = status.features || {};
         const configStatus = status.config_status || {};
+        container.replaceChildren();
+        [['Telegram Bot', configStatus.bot_token], ['OpenAI API', configStatus.openai_api_key]].forEach(([name, configured]) => {
+            const row = document.createElement('div');
+            row.className = 'connection-row';
+            const label = document.createElement('span');
+            label.textContent = name;
+            const state = document.createElement('span');
+            state.className = `state-label${configured ? '' : ' warning'}`;
+            state.textContent = configured ? '✓ 已配置' : '! 未配置';
+            row.append(label, state);
+            container.append(row);
+        });
+        Object.entries(status.features || {}).forEach(([feature, enabled]) => {
+            const toggle = document.getElementById(`toggle-${feature}`);
+            // 轮询结果不能覆盖正在提交的开关。
+            if (toggle && !toggle.disabled) toggle.checked = Boolean(enabled);
+        });
+        this.updateFeatureLabels();
+    }
 
-        const statusItems = [
-            {
-                title: '💬 AI 对话',
-                enabled: features.chat,
-                description: '智能对话功能'
-            },
-            {
-                title: '🎨 AI 绘画',
-                enabled: features.drawing,
-                description: '图片生成功能'
-            },
-            {
-                title: '🔍 联网搜索',
-                enabled: features.search,
-                description: '信息搜索功能'
-            },
-            {
-                title: '📝 群聊总结',
-                enabled: features.auto_summary,
-                description: '自动总结功能'
-            },
-            {
-                title: '👋 欢迎新成员',
-                enabled: features.welcome_message,
-                description: '新成员欢迎功能'
-            },
-            {
-                title: '🔑 Bot Token',
-                enabled: configStatus.bot_token,
-                description: 'Telegram Bot 令牌',
-                isConfig: true
-            },
-            {
-                title: '🤖 OpenAI API',
-                enabled: configStatus.openai_api_key,
-                description: 'OpenAI API 密钥',
-                isConfig: true
-            }
-        ];
-
-        container.innerHTML = statusItems.map(item => {
-            const statusClass = item.enabled ? 'status-enabled' : 
-                               item.isConfig ? 'status-warning' : 'status-disabled';
-            const statusIcon = item.enabled ? '✅' : item.isConfig ? '⚠️' : '❌';
-            const statusText = item.enabled ? '正常' : item.isConfig ? '未配置' : '禁用';
-
-            return `
-                <div class="col-md-6 col-lg-3 mb-3">
-                    <div class="status-card ${statusClass}">
-                        <div class="h5 mb-1">${item.title}</div>
-                        <div class="mb-2">${statusIcon} ${statusText}</div>
-                        <small>${item.description}</small>
-                    </div>
-                </div>
-            `;
-        }).join('');
+    updateFeatureLabels() {
+        document.querySelectorAll('[data-feature]').forEach(toggle => {
+            document.getElementById(`state-${toggle.dataset.feature}`).textContent = toggle.disabled ? '保存中' : toggle.checked ? '已启用' : '未启用';
+        });
     }
 
     // 设置事件监听器
@@ -332,7 +419,9 @@ class BotControlPanel {
         if (configSelect) {
             configSelect.addEventListener('change', (e) => {
                 // 切换到新的配置
+                this.updateCurrentConfigFromForm();
                 const newIndex = parseInt(e.target.value);
+                this.editingConfigIndex = newIndex;
                 const openaiConfigs = this.config.ai_services.openai_configs || [];
                 const newConfig = openaiConfigs[newIndex] || {};
 
@@ -376,6 +465,7 @@ class BotControlPanel {
         if (aiForm) {
             aiForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (e.submitter?.disabled) return;
                 this.saveAIConfig();
             });
         }
@@ -385,6 +475,7 @@ class BotControlPanel {
         if (welcomeForm) {
             welcomeForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (e.submitter?.disabled) return;
                 this.saveWelcomeConfig();
             });
         }
@@ -394,6 +485,7 @@ class BotControlPanel {
         if (summaryForm) {
             summaryForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (e.submitter?.disabled) return;
                 this.saveSummaryConfig();
             });
         }
@@ -403,6 +495,7 @@ class BotControlPanel {
         if (hotspotForm) {
             hotspotForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (e.submitter?.disabled) return;
                 this.saveHotspotPushConfig();
             });
         }
@@ -412,6 +505,7 @@ class BotControlPanel {
         if (historyForm) {
             historyForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (e.submitter?.disabled) return;
                 this.saveHistoryConfig();
             });
         }
@@ -421,6 +515,7 @@ class BotControlPanel {
         if (advancedForm) {
             advancedForm.addEventListener('submit', (e) => {
                 e.preventDefault();
+                if (e.submitter?.disabled) return;
                 this.saveAdvancedConfig();
             });
         }
@@ -428,29 +523,22 @@ class BotControlPanel {
 
     // 切换功能
     async toggleFeature(feature, enabled) {
+        const toggle = document.getElementById(`toggle-${feature}`);
+        toggle.disabled = true;
+        this.updateFeatureLabels();
         try {
             const response = await fetch(`/api/features/${feature}/toggle`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+                method: 'POST', headers: { 'Content-Type': 'application/json' }
             });
-
             const data = await response.json();
-            
-            if (data.success) {
-                this.showNotification(data.message, 'success');
-                this.updateStatus();
-            } else {
-                this.showNotification('操作失败: ' + data.error, 'error');
-                // 恢复开关状态
-                const toggle = document.getElementById(`toggle-${feature}`);
-                if (toggle) {
-                    toggle.checked = !enabled;
-                }
-            }
+            if (!response.ok || !data.success) throw new Error(data.error || '操作失败');
+            this.showNotification(data.message, 'success');
         } catch (error) {
-            this.showNotification('网络错误: ' + error.message, 'error');
+            toggle.checked = !enabled;
+            this.showNotification(`操作失败：${error.message}`, 'error');
+        } finally {
+            toggle.disabled = false;
+            this.updateFeatureLabels();
         }
     }
 
@@ -470,7 +558,7 @@ class BotControlPanel {
                     model: document.getElementById('drawing-model').value,
                     size: document.getElementById('image-size').value,
                     quality: document.getElementById('image-quality').value,
-                    daily_limit: parseInt(document.getElementById('daily-limit').value) || 10
+                    daily_limit: parseInt(document.getElementById('daily-limit').value)
                 },
                 chat: {
                     history_enabled: document.getElementById('chat-history-enabled').checked,
@@ -493,8 +581,7 @@ class BotControlPanel {
             if (data.success) {
                 this.showNotification(data.message, 'success');
                 this.updateStatus();
-                // 重新加载配置以确保数据同步
-                this.loadConfig();
+                this.markSaved('ai-config-form');
             } else {
                 this.showNotification('保存失败: ' + data.error, 'error');
             }
@@ -525,6 +612,7 @@ class BotControlPanel {
             
             if (data.success) {
                 this.showNotification(data.message, 'success');
+                this.markSaved('welcome-config-form');
             } else {
                 this.showNotification('保存失败: ' + data.error, 'error');
             }
@@ -548,6 +636,7 @@ class BotControlPanel {
             };
 
             await this.updateConfig(configData);
+            this.markSaved('summary-config-form');
             this.showNotification('总结设置已保存', 'success');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
@@ -574,6 +663,7 @@ class BotControlPanel {
             };
 
             await this.updateConfig(configData);
+            this.markSaved('hotspot-config-form');
             this.showNotification('热点推送设置已保存', 'success');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
@@ -594,6 +684,7 @@ class BotControlPanel {
             };
 
             await this.updateConfig(configData);
+            this.markSaved('history-config-form');
             this.showNotification('历史记录设置已保存', 'success');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
@@ -617,6 +708,7 @@ class BotControlPanel {
             };
 
             await this.updateConfig(configData);
+            this.markSaved('advanced-config-form');
             this.showNotification('高级设置已保存，部分设置需要重启后生效', 'warning');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
@@ -652,18 +744,22 @@ class BotControlPanel {
         if (textarea && preview) {
             const message = textarea.value || '欢迎 {user_name} 加入群聊！';
             const previewText = message
-                .replace('{user_name}', '张三')
-                .replace('{user_mention}', '@zhangsan')
-                .replace('{chat_title}', '示例群聊');
+                .replaceAll('{user_name}', '张三')
+                .replaceAll('{user_mention}', '@zhangsan')
+                .replaceAll('{chat_title}', '示例群聊');
             
-            preview.innerHTML = previewText || '在上方输入欢迎消息模板以查看预览效果';
+            preview.textContent = previewText || '在上方输入欢迎消息模板以查看预览效果';
         }
     }
 
     // 设置按钮加载状态
     setButtonLoading(button, loading) {
         if (!button) return;
-        
+        button.setAttribute('aria-busy', String(loading));
+        if (button.type === 'submit' && button.form) {
+            // 保存期间锁定当前表单，避免后续输入被误标记为已保存。
+            button.form.inert = loading;
+        }
         if (loading) {
             button.classList.add('loading');
             button.disabled = true;
@@ -676,25 +772,12 @@ class BotControlPanel {
     // 显示通知
     showNotification(message, type = 'info') {
         const toast = document.getElementById('notification-toast');
-        const toastMessage = document.getElementById('toast-message');
-        const toastHeader = toast.querySelector('.toast-header i');
-        
-        if (!toast || !toastMessage) return;
-
-        // 设置图标和样式
-        const icons = {
-            success: 'bi-check-circle text-success',
-            error: 'bi-exclamation-circle text-danger',
-            warning: 'bi-exclamation-triangle text-warning',
-            info: 'bi-info-circle text-primary'
-        };
-
-        toastHeader.className = `me-2 ${icons[type] || icons.info}`;
-        toastMessage.textContent = message;
-
-        // 显示 Toast
-        const bsToast = new bootstrap.Toast(toast);
-        bsToast.show();
+        toast.dataset.type = type;
+        toast.querySelector('.toast-symbol').textContent = { success: '✓', error: '!', warning: '!', info: 'i' }[type] || 'i';
+        document.getElementById('toast-message').textContent = message || '操作完成';
+        toast.classList.add('show');
+        clearTimeout(this.toastTimer);
+        this.toastTimer = setTimeout(() => toast.classList.remove('show'), type === 'error' ? 9000 : 5000);
     }
 
     // 开始状态更新
@@ -711,7 +794,8 @@ class BotControlPanel {
         const refreshImageBtn = document.getElementById('refresh-image-models');
         const icon = refreshBtn.querySelector('i');
         const imageIcon = refreshImageBtn.querySelector('i');
-        
+        const requestedGroup = this.editingConfigIndex;
+
         // 设置加载状态
         icon.classList.add('fa-spin');
         imageIcon.classList.add('fa-spin');
@@ -732,6 +816,7 @@ class BotControlPanel {
             const data = await response.json();
 
             if (data.success) {
+                if (this.editingConfigIndex !== requestedGroup) return;
                 const models = data.models;
                 
                 // 更新聊天模型选择框
@@ -759,12 +844,15 @@ class BotControlPanel {
                     drawingSelectElement.appendChild(drawingOption);
                 });
 
-                // 尝试恢复之前的选中值
-                if (Array.from(chatSelectElement.options).some(opt => opt.value === chatSelectedValue)) {
-                    chatSelectElement.value = chatSelectedValue;
-                }
-                if (Array.from(drawingSelectElement.options).some(opt => opt.value === drawingSelectedValue)) {
-                    drawingSelectElement.value = drawingSelectedValue;
+                // 刷新列表不应悄悄替换已配置的模型。
+                [[chatSelectElement, chatSelectedValue], [drawingSelectElement, drawingSelectedValue]].forEach(([select, value]) => {
+                    if (value && !Array.from(select.options).some(option => option.value === value)) {
+                        select.add(new Option(value, value));
+                    }
+                    if (value) select.value = value;
+                });
+                if (chatSelectElement.value !== chatSelectedValue || drawingSelectElement.value !== drawingSelectedValue) {
+                    this.markDirty(document.getElementById('ai-config-form'));
                 }
 
                 this.showNotification('模型列表已更新', 'success');
@@ -781,50 +869,45 @@ class BotControlPanel {
         }
     }
 
+    selectConfigGroup(index) {
+        const select = document.getElementById('openai-config-select');
+        select.replaceChildren();
+        this.config.ai_services.openai_configs.forEach((config, i) => {
+            select.add(new Option(config.name || `配置 ${i + 1}`, String(i)));
+        });
+        select.value = index;
+        this.editingConfigIndex = index;
+        const config = this.config.ai_services.openai_configs[index];
+        this.updateChatModelSelect(config);
+        this.updateOpenAIFormFields(config);
+        this.markDirty(document.getElementById('ai-config-form'));
+    }
+
     addOpenAIConfig() {
-        if (!this.config.ai_services.openai_configs) {
-            this.config.ai_services.openai_configs = [];
-        }
-        const newConfig = {
-            name: `新配置 ${this.config.ai_services.openai_configs.length + 1}`,
-            api_key: "",
-            api_base_url: "https://api.openai.com/v1",
-            model: "gpt-3.5-turbo",
-            max_tokens: 1000,
-            temperature: 0.7
-        };
-        this.config.ai_services.openai_configs.push(newConfig);
-        const newIndex = this.config.ai_services.openai_configs.length - 1;
-        this.config.ai_services.active_openai_config_index = newIndex;
-        this.updateAIConfigForm();
-        document.getElementById('openai-config-select').value = newIndex;
+        this.updateCurrentConfigFromForm();
+        const configs = this.config.ai_services.openai_configs;
+        configs.push({
+            name: `新配置 ${configs.length + 1}`,
+            api_key: '', api_base_url: 'https://api.openai.com/v1',
+            model: '', max_tokens: 1000, temperature: 0.7
+        });
+        this.selectConfigGroup(configs.length - 1);
     }
 
     removeOpenAIConfig() {
         const configs = this.config.ai_services.openai_configs;
-        if (!configs || configs.length <= 1) {
+        if (configs.length <= 1) {
             this.showNotification('至少需要保留一个配置组', 'warning');
             return;
         }
-        const indexToRemove = parseInt(document.getElementById('openai-config-select').value);
-        configs.splice(indexToRemove, 1);
-        
-        // 更新 active_openai_config_index
-        let newIndex = this.config.ai_services.active_openai_config_index;
-        if (newIndex === indexToRemove) {
-            newIndex = 0;
-        } else if (newIndex > indexToRemove) {
-            newIndex--;
-        }
-        this.config.ai_services.active_openai_config_index = newIndex;
-        
-        this.updateAIConfigForm();
-        document.getElementById('openai-config-select').value = newIndex;
+        if (!window.confirm('删除当前配置组？保存 AI 配置后生效。')) return;
+        configs.splice(this.editingConfigIndex, 1);
+        this.selectConfigGroup(0);
     }
 
     updateCurrentConfigFromForm() {
         const configs = this.config.ai_services.openai_configs;
-        const currentIndex = parseInt(document.getElementById('openai-config-select').value);
+        const currentIndex = this.editingConfigIndex ?? parseInt(document.getElementById('openai-config-select').value);
         if (configs && configs[currentIndex]) {
             const currentConfig = configs[currentIndex];
             currentConfig.name = document.getElementById('openai-config-name').value;
@@ -939,6 +1022,7 @@ class BotControlPanel {
             return;
         }
         
+        if (!window.confirm('此操作会请求重新部署服务，可能暂时中断机器人。确定继续？')) return;
         // 设置按钮加载状态
         this.setButtonLoading(button, true);
         const originalText = button.innerHTML;
@@ -952,7 +1036,7 @@ class BotControlPanel {
             
             // 由于使用了 no-cors 模式，我们无法检查响应状态
             // 但如果没有抛出异常，说明请求已发送
-            this.showNotification('重启请求已发送', 'success');
+            this.showNotification('已尝试发送重启请求；浏览器无法验证结果，请在 Render 控制台确认。', 'info');
             
         } catch (error) {
             console.error('重启请求失败:', error);
@@ -968,6 +1052,7 @@ class BotControlPanel {
     async redeployKoyebService() {
         const button = document.getElementById('koyeb-redeploy-button');
         
+        if (!window.confirm('此操作会请求重新部署服务，可能暂时中断机器人。确定继续？')) return;
         // 设置按钮加载状态
         this.setButtonLoading(button, true);
         const originalText = button.innerHTML;

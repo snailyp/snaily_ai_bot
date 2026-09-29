@@ -40,25 +40,19 @@ pip install -r requirements.txt
 
 ### 3. 配置设置
 
-1. 复制配置示例文件：
+1. 复制环境变量示例文件：
 ```bash
-cp config/config.example.json config/config.json
+cp .env.example .env
 ```
 
-2. 编辑 `config/config.json`，设置必要的配置：
+2. 编辑 `.env`，设置必要的配置：
 
-```json
-{
-  "telegram": {
-    "bot_token": "YOUR_BOT_TOKEN_HERE",
-    "admin_user_ids": [123456789]
-  },
-  "ai_services": {
-    "openai": {
-      "api_key": "YOUR_OPENAI_API_KEY_HERE"
-    }
-  }
-}
+```dotenv
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+TELEGRAM_ADMIN_USER_IDS=123456789
+OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HERE
+WEB_USERNAME=admin
+WEB_PASSWORD=your-secure-password
 ```
 
 #### 获取 Telegram Bot Token
@@ -82,8 +76,8 @@ cp config/config.example.json config/config.json
 python run_bot.py
 
 # 或者分别启动
-python main.py  # 仅启动机器人
-python webapp/app.py  # 仅启动 Web 控制面板
+python -m bot.main  # 仅启动机器人
+python -m webapp.app  # 仅启动 Web 控制面板
 ```
 
 ### 5. 访问控制面板
@@ -184,19 +178,18 @@ snaily_ai_bot/
 │   │   ├── draw.py        # AI 绘画功能
 │   │   ├── welcome.py     # 欢迎新成员
 │   │   └── summary.py     # 群聊总结
+│   ├── main.py             # Telegram 机器人主程序
 │   └── services/          # 服务模块
 │       ├── ai_services.py # AI 服务封装
 │       └── message_store.py # 消息存储
 ├── config/                # 配置管理
-│   ├── settings.py        # 配置管理器
-│   └── config.example.json # 配置示例
+│   └── settings.py        # 配置管理器
 ├── webapp/                # Web 控制面板
 │   ├── app.py            # Flask 应用
 │   ├── templates/        # HTML 模板
 │   └── static/           # 静态资源
 ├── data/                 # 数据存储目录
 ├── logs/                 # 日志文件目录
-├── main.py              # 机器人主程序
 ├── run_bot.py           # 启动脚本
 └── requirements.txt     # 依赖列表
 ```
@@ -206,7 +199,7 @@ snaily_ai_bot/
 ### 添加新功能
 
 1. 在 `bot/handlers/` 中创建新的处理器文件
-2. 在 `main.py` 中注册新的命令处理器
+2. 在 `bot/main.py` 中注册新的命令处理器
 3. 在配置文件中添加相应的功能开关
 4. 在 Web 控制面板中添加对应的管理界面
 

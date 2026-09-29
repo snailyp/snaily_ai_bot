@@ -215,7 +215,7 @@ async def set_welcome_command(
 
         # 更新配置
         config_manager.set("features.welcome_message.message", new_message)
-        config_manager.save_config({})
+        config_manager.save_config_to_redis()
 
         # 测试新消息
         test_message = new_message.format(

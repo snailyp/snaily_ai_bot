@@ -52,10 +52,15 @@ class ConfigManager:
                 )
                 logger.info("使用 REDIS_URL 创建 Redis 连接")
             else:
-                # 回退到原有的分别配置方式
-                redis_host = os.getenv("REDIS_HOST", "localhost")
-                redis_port = int(os.getenv("REDIS_PORT", "6379"))
-                redis_db = int(os.getenv("REDIS_DB", "0"))
+                # Redis 是可选依赖；没有显式配置时不要阻塞启动去连接 localhost。
+                redis_host = os.getenv("REDIS_HOST", "").strip()
+                if not redis_host:
+                    logger.info("未配置 Redis，将只使用环境变量和内存配置")
+                    self.redis_client = None
+                    return
+
+                redis_port = self._safe_int_env("REDIS_PORT", 6379)
+                redis_db = self._safe_int_env("REDIS_DB", 0)
 
                 # 创建 Redis 客户端实例
                 self.redis_client = redis.Redis(
@@ -77,6 +82,72 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"Redis 连接失败: {e}，将使用环境变量加载配置")
             self.redis_client = None
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        """读取布尔环境变量，统一处理大小写和空值。"""
+        value = os.getenv(name)
+        if value is None or value.strip() == "":
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _safe_int_env(name: str, default: int) -> int:
+        """读取连接参数整数，避免空值让启动流程抛异常。"""
+        value = os.getenv(name, "").strip()
+        try:
+            return int(value) if value else default
+        except ValueError:
+            logger.warning(f"环境变量 {name} 不是有效整数，使用默认值 {default}")
+            return default
+
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        """读取整数环境变量；非法值回退到默认值。"""
+        try:
+            value = os.getenv(name)
+            return default if value is None or value.strip() == "" else int(value)
+        except (TypeError, ValueError):
+            logger.warning(f"环境变量 {name} 不是有效整数，使用默认值 {default}")
+            return default
+
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        """读取浮点环境变量；非法值回退到默认值。"""
+        try:
+            value = os.getenv(name)
+            return default if value is None or value.strip() == "" else float(value)
+        except (TypeError, ValueError):
+            logger.warning(f"环境变量 {name} 不是有效数字，使用默认值 {default}")
+            return default
+
+    @staticmethod
+    def _env_list(name: str, default: str = "") -> list[str]:
+        """读取逗号分隔的环境变量列表。"""
+        return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+    def _load_openai_configs(self) -> list[dict[str, Any]]:
+        """加载多组 OpenAI 配置，并兼容旧的单组环境变量。"""
+        raw_configs = os.getenv("OPENAI_CONFIGS_JSON", "").strip()
+        if raw_configs:
+            try:
+                configs = json.loads(raw_configs)
+                if isinstance(configs, list) and all(isinstance(item, dict) for item in configs):
+                    return configs
+                logger.warning("OPENAI_CONFIGS_JSON 必须是对象数组，已回退到默认配置")
+            except json.JSONDecodeError as exc:
+                logger.warning(f"OPENAI_CONFIGS_JSON 解析失败: {exc}，已回退到默认配置")
+
+        return [
+            {
+                "name": "默认配置",
+                "api_key": os.getenv("OPENAI_API_KEY", ""),
+                "api_base_url": os.getenv("OPENAI_API_BASE_URL", "https://api.openai.com/v1"),
+                "model": os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
+                "max_tokens": self._env_int("OPENAI_MAX_TOKENS", 1000),
+                "temperature": self._env_float("OPENAI_TEMPERATURE", 0.7),
+            }
+        ]
 
     def load_config(self) -> None:
         """从 Redis 缓存或环境变量加载配置"""
@@ -161,26 +232,13 @@ class ConfigManager:
                 "telegram": {
                     "bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
                     "admin_user_ids": [
-                        int(x.strip())
-                        for x in os.getenv("TELEGRAM_ADMIN_USER_IDS", "").split(",")
-                        if x.strip()
+                        int(x)
+                        for x in self._env_list("TELEGRAM_ADMIN_USER_IDS")
+                        if x.lstrip("-").isdigit()
                     ],
                 },
                 "ai_services": {
-                    "openai_configs": [
-                        {
-                            "name": "默认配置",
-                            "api_key": os.getenv("OPENAI_API_KEY", ""),
-                            "api_base_url": os.getenv(
-                                "OPENAI_API_BASE_URL", "https://api.openai.com/v1"
-                            ),
-                            "model": os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
-                            "max_tokens": int(os.getenv("OPENAI_MAX_TOKENS", "1000")),
-                            "temperature": float(
-                                os.getenv("OPENAI_TEMPERATURE", "0.7")
-                            ),
-                        }
-                    ],
+                    "openai_configs": self._load_openai_configs(),
                     "active_openai_config_index": 0,
                     "drawing": {
                         "model": os.getenv("DRAWING_MODEL", "dall-e-3"),
@@ -188,94 +246,56 @@ class ConfigManager:
                         "quality": os.getenv("DRAWING_QUALITY", "standard"),
                     },
                     "search": {
-                        "enabled": os.getenv("SEARCH_ENABLED", "true").lower()
-                        == "true",
-                        "max_results": int(os.getenv("SEARCH_MAX_RESULTS", "5")),
+                        "enabled": self._env_bool("SEARCH_ENABLED", True),
+                        "max_results": self._env_int("SEARCH_MAX_RESULTS", 5),
                     },
                 },
                 "features": {
                     "welcome_message": {
-                        "enabled": os.getenv("WELCOME_MESSAGE_ENABLED", "true").lower()
-                        == "true",
+                        "enabled": self._env_bool("WELCOME_MESSAGE_ENABLED", True),
                         "message": os.getenv(
                             "WELCOME_MESSAGE",
                             "欢迎 {user_name} 加入群聊！🎉\n\n我是群助手机器人，可以帮助您：\n• 💬 智能对话 - 使用 /chat 开始对话\n• 🎨 AI绘画 - 使用 /draw 创作图片\n• 🔍 联网搜索 - 使用 /search 搜索信息\n• 📝 群聊总结 - 定时总结群聊内容\n\n输入 /help 查看更多功能！",
                         ).replace("\\n", "\n"),
-                        "delete_delay": int(
-                            os.getenv("WELCOME_MSG_DELETE_DELAY", "60")
-                        ),
+                        "delete_delay": self._env_int("WELCOME_MSG_DELETE_DELAY", 60),
                     },
                     "auto_summary": {
-                        "enabled": os.getenv("AUTO_SUMMARY_ENABLED", "true").lower()
-                        == "true",
-                        "interval_hours": int(
-                            os.getenv("AUTO_SUMMARY_INTERVAL_HOURS", "24")
-                        ),
-                        "min_messages": int(
-                            os.getenv("AUTO_SUMMARY_MIN_MESSAGES", "50")
-                        ),
+                        "enabled": self._env_bool("AUTO_SUMMARY_ENABLED", True),
+                        "interval_hours": self._env_int("AUTO_SUMMARY_INTERVAL_HOURS", 24),
+                        "min_messages": self._env_int("AUTO_SUMMARY_MIN_MESSAGES", 50),
                         "summary_prompt": os.getenv(
                             "AUTO_SUMMARY_PROMPT",
                             "请总结以下群聊对话的主要内容和话题：",
                         ).replace("\\n", "\n"),
                     },
                     "chat": {
-                        "enabled": os.getenv("CHAT_ENABLED", "true").lower() == "true",
+                        "enabled": self._env_bool("CHAT_ENABLED", True),
                         "system_prompt": os.getenv(
                             "CHAT_SYSTEM_PROMPT",
                             "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
                         ).replace("\\n", "\n"),
-                        "history_enabled": os.getenv(
-                            "CHAT_HISTORY_ENABLED", "true"
-                        ).lower()
-                        == "true",
-                        "history_max_length": int(
-                            os.getenv("CHAT_HISTORY_MAX_LENGTH", "10")
-                        ),
-                        "auto_reply_private": os.getenv(
-                            "AUTO_REPLY_PRIVATE", "false"
-                        ).lower()
-                        == "true",
-                        "short_message_threshold": int(
-                            os.getenv("SHORT_MESSAGE_THRESHOLD", "1024")
-                        ),
+                        "history_enabled": self._env_bool("CHAT_HISTORY_ENABLED", True),
+                        "history_max_length": self._env_int("CHAT_HISTORY_MAX_LENGTH", 10),
+                        "auto_reply_private": self._env_bool("AUTO_REPLY_PRIVATE", False),
+                        "short_message_threshold": self._env_int("SHORT_MESSAGE_THRESHOLD", 1024),
                     },
                     "drawing": {
-                        "enabled": os.getenv("DRAWING_ENABLED", "true").lower()
-                        == "true",
-                        "daily_limit": int(os.getenv("DRAWING_DAILY_LIMIT", "10")),
+                        "enabled": self._env_bool("DRAWING_ENABLED", True),
+                        "daily_limit": self._env_int("DRAWING_DAILY_LIMIT", 10),
                     },
                     "search": {
-                        "enabled": os.getenv("SEARCH_FEATURE_ENABLED", "true").lower()
-                        == "true",
-                        "daily_limit": int(os.getenv("SEARCH_DAILY_LIMIT", "20")),
+                        "enabled": self._env_bool("SEARCH_FEATURE_ENABLED", True),
+                        "daily_limit": self._env_int("SEARCH_DAILY_LIMIT", 20),
                     },
                     "history": {
-                        "cleanup_enabled": os.getenv(
-                            "HISTORY_CLEANUP_ENABLED", "false"
-                        ).lower()
-                        == "true",
-                        "cleanup_retention_days": int(
-                            os.getenv("HISTORY_CLEANUP_RETENTION_DAYS", "30")
-                        ),
+                        "cleanup_enabled": self._env_bool("HISTORY_CLEANUP_ENABLED", False),
+                        "cleanup_retention_days": self._env_int("HISTORY_CLEANUP_RETENTION_DAYS", 30),
                     },
                     "hotspot_push": {
-                        "enabled": os.getenv("HOTSPOT_PUSH_ENABLED", "true").lower()
-                        == "true",
+                        "enabled": self._env_bool("HOTSPOT_PUSH_ENABLED", True),
                         "push_schedule": os.getenv("HOTSPOT_PUSH_SCHEDULE", "09:00"),
-                        "sources": [
-                            x.strip()
-                            for x in os.getenv(
-                                "HOTSPOT_SOURCES",
-                                "github-trending-today,producthunt",
-                            ).split(",")
-                            if x.strip()
-                        ],
-                        "keywords": [
-                            x.strip()
-                            for x in os.getenv("HOTSPOT_KEYWORDS", "").split(",")
-                            if x.strip()
-                        ],
+                        "sources": self._env_list("HOTSPOT_SOURCES", "github-trending-today,producthunt"),
+                        "keywords": self._env_list("HOTSPOT_KEYWORDS"),
                         "telegram_push_chat_id": os.getenv(
                             "TELEGRAM_PUSH_CHAT_ID", "-4656523535"
                         ),

@@ -72,6 +72,7 @@ class TelegramBot:
     def __init__(self):
         self.application = None
         self.scheduler = AsyncIOScheduler()
+        self.loop = None
         self.shutdown_event = asyncio.Event()  # 新增: 用于优雅停机的事件
         self._is_stopping = False
         self._is_stopped = False
@@ -79,6 +80,7 @@ class TelegramBot:
     async def setup_bot(self):
         """设置机器人"""
         try:
+            self.loop = asyncio.get_running_loop()
             # 获取配置
             bot_token = config_manager.get_bot_token()
             if not bot_token:
@@ -110,6 +112,13 @@ class TelegramBot:
             self.application = None
             raise
 
+    def request_reschedule(self):
+        """从任意线程请求主事件循环重新加载定时任务。"""
+        if not self.loop or not self.loop.is_running():
+            return False
+        asyncio.run_coroutine_threadsafe(self.reschedule_jobs(), self.loop)
+        return True
+
     def register_handlers(self):
         """注册消息处理器"""
         if self.application is None:
@@ -128,32 +137,28 @@ class TelegramBot:
         app.add_handler(CommandHandler("switch_model", switch_model_command))
 
         # AI 功能命令
-        if config_manager.is_feature_enabled("chat"):
-            app.add_handler(CommandHandler("chat", chat_command))
-
-        if config_manager.is_feature_enabled("search"):
-            app.add_handler(CommandHandler("search", search_command))
+        # 始终注册处理器，处理器内部根据最新配置判断是否执行。
+        # 这样 Web 面板切换开关后无需重启机器人即可生效。
+        app.add_handler(CommandHandler("chat", chat_command))
+        app.add_handler(CommandHandler("search", search_command))
 
         # Ask GB 命令
         app.add_handler(CommandHandler("ask_gb", ask_gb_command))
 
-        if config_manager.is_feature_enabled("drawing"):
-            app.add_handler(CommandHandler("draw", draw_command))
-            app.add_handler(CommandHandler("draw_help", draw_help_command))
+        app.add_handler(CommandHandler("draw", draw_command))
+        app.add_handler(CommandHandler("draw_help", draw_help_command))
 
         # 群聊总结功能
-        if config_manager.is_feature_enabled("auto_summary"):
-            app.add_handler(CommandHandler("summary", summary_command))
-            app.add_handler(CommandHandler("summary_stats", summary_stats_command))
+        app.add_handler(CommandHandler("summary", summary_command))
+        app.add_handler(CommandHandler("summary_stats", summary_stats_command))
 
         # 新成员欢迎
-        if config_manager.is_feature_enabled("welcome_message"):
-            app.add_handler(
-                ChatMemberHandler(new_member_handler, ChatMemberHandler.CHAT_MEMBER)
-            )
-            # 管理员命令
-            app.add_handler(CommandHandler("welcome_test", welcome_test_command))
-            app.add_handler(CommandHandler("set_welcome", set_welcome_command))
+        app.add_handler(
+            ChatMemberHandler(new_member_handler, ChatMemberHandler.CHAT_MEMBER)
+        )
+        # 管理员命令
+        app.add_handler(CommandHandler("welcome_test", welcome_test_command))
+        app.add_handler(CommandHandler("set_welcome", set_welcome_command))
 
         # 普通消息处理（用于群聊记录和AI对话）
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

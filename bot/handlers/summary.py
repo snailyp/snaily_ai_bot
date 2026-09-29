@@ -247,6 +247,10 @@ async def summary_stats_command(
         if not user or not chat or not message:
             return
 
+        if not config_manager.is_feature_enabled("auto_summary"):
+            await message.reply_text("抱歉，群聊总结功能当前已禁用。")
+            return
+
         # 检查是否在群组中
         if chat.type not in ["group", "supergroup"]:
             await message.reply_text("此命令只能在群组中使用。")

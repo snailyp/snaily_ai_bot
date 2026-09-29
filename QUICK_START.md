@@ -39,11 +39,11 @@ pip install -r requirements.txt
 # 3. 运行部署检查
 python deploy.py
 
-# 4. 编辑配置文件
-# 在 config/config.json 中设置：
-# - telegram.bot_token: 你的 Bot Token
-# - telegram.admin_user_ids: [你的用户ID]
-# - ai_services.openai.api_key: 你的 OpenAI API Key
+# 4. 编辑环境变量文件
+# 先复制 .env.example 为 .env，然后设置：
+# - TELEGRAM_BOT_TOKEN: 你的 Bot Token
+# - TELEGRAM_ADMIN_USER_IDS: 你的用户 ID（多个 ID 用逗号分隔）
+# - OPENAI_API_KEY: 你的 OpenAI API Key
 ```
 
 ## 4️⃣ 启动机器人

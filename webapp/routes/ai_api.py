@@ -32,7 +32,9 @@ def update_ai_config():
         if "drawing" in data:
             drawing_config = data["drawing"]
             for key, value in drawing_config.items():
-                config_manager.set(f"ai_services.drawing.{key}", value)
+                # 每日限额属于功能策略；模型、尺寸和质量属于 AI 服务参数。
+                target = "features.drawing.daily_limit" if key == "daily_limit" else f"ai_services.drawing.{key}"
+                config_manager.set(target, value)
 
         # 更新聊天配置
         if "chat" in data:
