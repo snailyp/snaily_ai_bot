@@ -105,13 +105,13 @@
         <section class="view" id="ai-config" aria-label="AI 配置" hidden><form id="ai-config-form" novalidate>
             <section class="panel ai-routing"><div class="panel-heading"><div><p class="eyebrow">MODEL ROUTING / 各司其职</p><h2>合适的模型，放在合适的位置。</h2></div><span class="subtle-badge">保存后生效</span></div><p class="panel-description">连接可以复用，用途独立分配。下方切换编辑对象，不会改变这里的选择。</p>
                 <div class="ai-role-grid">
-                    <div class="ai-role"><span class="ai-role-index">01 / CHAT</span><label for="ai-chat-model">默认聊天模型</label><select id="ai-chat-model"></select><small>日常对话与私聊回复</small></div>
+                    <div class="ai-role"><span class="ai-role-index">01 / CHAT</span><label for="ai-chat-model">默认聊天模型</label><select id="ai-chat-model"></select><small>日常对话与私聊回复</small><label for="chat-active-prompt">聊天系统提示词</label><select id="chat-active-prompt"></select><small>全局聊天使用；保存后生效</small></div>
                     <div class="ai-role"><span class="ai-role-index">02 / TASK</span><label for="ai-task-model">默认任务模型</label><select id="ai-task-model"></select><small id="ai-task-model-hint">群聊总结等后台文本任务；留空跟随聊天模型</small></div>
                     <div class="ai-role"><span class="ai-role-index">03 / IMAGE</span><label for="ai-drawing-model">默认绘画模型</label><select id="ai-drawing-model"></select><small>使用独立的图像服务商与密钥</small></div>
                 </div>
             </section>
             <div class="ai-tabs" role="tablist" aria-label="AI 设置分类">
-                {% for id, name, index in [('providers','文本服务商','01'),('models','文本模型','02'),('drawing','图像生成','03'),('mcp','MCP 工具','04'),('search','联网搜索','05'),('preferences','对话偏好','06')] %}<button type="button" role="tab" class="ai-tab" id="ai-tab-{{ id }}" aria-controls="ai-pane-{{ id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}" data-ai-tab="{{ id }}"><span>{{ index }}</span>{{ name }}</button>{% endfor %}
+                {% for id, name, index in [('providers','文本服务商','01'),('models','文本模型','02'),('drawing','图像生成','03'),('mcp','MCP 工具','04'),('search','联网搜索','05'),('prompts','系统提示词','06'),('preferences','对话偏好','07')] %}<button type="button" role="tab" class="ai-tab" id="ai-tab-{{ id }}" aria-controls="ai-pane-{{ id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}" data-ai-tab="{{ id }}"><span>{{ index }}</span>{{ name }}</button>{% endfor %}
             </div>
             <div class="ai-pane" role="tabpanel" id="ai-pane-providers" aria-labelledby="ai-tab-providers">{{ ai_collection('text', 'provider', '文本服务商', 'CONNECTION LIBRARY') }}</div>
             <div class="ai-pane" role="tabpanel" id="ai-pane-models" aria-labelledby="ai-tab-models" hidden>{{ ai_collection('text', 'model', '文本模型', 'TEXT MODEL LIBRARY') }}</div>
@@ -155,6 +155,18 @@
                 {{ ai_collection('search', 'provider', '搜索服务', 'SEARCH PROVIDERS') }}
             </div>
             <div class="ai-pane" role="tabpanel" id="ai-pane-preferences" aria-labelledby="ai-tab-preferences" hidden><section class="panel narrow-panel"><div class="panel-heading"><div><p class="eyebrow">CONVERSATION & MEMORY</p><h2>让对话，保持熟悉的节奏。</h2></div>{{ icon('chat') }}</div>{{ switch('chat-history-enabled','记住对话上下文','关闭后使用一问一答模式。') }}{{ field('chat-history-max-length','保留对话轮数','number','1 轮 = 1 问 1 答，建议 5–20 轮。',min='1',value='10') }}{{ switch('chat-auto-reply-private','私聊自动回复','自动回复收到的私聊消息。') }}{{ field('chat-short-message-threshold','短消息阈值','number','短于此字符数的消息被视为短消息。',min='1',value='1024') }}<div class="editorial-note"><p>温度、Token 上限等请求参数在「文本模型」内单独设置；历史清理策略仍在 <a href="#history-config">历史记录</a> 管理。</p></div></section></div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-prompts" aria-labelledby="ai-tab-prompts" hidden>
+                <section class="panel ai-collection"><div class="panel-heading"><div><p class="eyebrow">PROMPT LIBRARY / 对话的起点</p><h2>给每一种对话，留一个角色。</h2></div><span class="subtle-badge" id="chat-prompt-count"></span></div>
+                    <p class="panel-description">选择条目仅切换编辑对象。「设为当前使用」后保存，下一次聊天即生效；不会清空历史，也不影响后台任务。</p>
+                    <div class="ai-editor-layout"><div class="ai-library"><div class="ai-library-list" id="chat-prompt-list" aria-label="系统提示词列表"></div><button class="btn btn-secondary ai-add" type="button" id="add-chat-prompt">＋ 添加提示词</button></div>
+                        <fieldset class="ai-editor"><legend class="sr-only">编辑系统提示词</legend><div class="ai-editor-heading"><span class="tiny-label" id="chat-prompt-state"></span><button class="btn btn-quiet danger-text" type="button" id="remove-chat-prompt">删除提示词</button></div>
+                            {{ field('chat-prompt-name','提示词名称',placeholder='例如：编程助手') }}
+                            <div class="field"><label for="chat-prompt-content">系统提示词正文</label><textarea id="chat-prompt-content" rows="12" placeholder="描述助手的角色、回答方式与约束…"></textarea><small>支持多行纯文本；允许留空。不进行模板变量替换。</small></div>
+                            <button class="btn btn-secondary" type="button" id="activate-chat-prompt">设为当前使用</button>
+                        </fieldset>
+                    </div>
+                </section>
+            </div>
             <div class="ai-validation" id="ai-validation" role="alert" hidden></div>
             {{ save('保存全部 AI 设置') }}
         </form></section>

@@ -76,6 +76,20 @@ class AIAPITests(unittest.TestCase):
         self.assertEqual(self.manager.get_ai_config()["text"]["providers"][0]["api_key"], "key-a")
         self.assertEqual(self.manager.get_ai_config()["text"]["models"][0]["parameters"], {"temperature": 0})
 
+    def test_prompt_response_is_normalized_and_invalid_reference_rejected(self):
+        chat = {"system_prompts": [{"id": "custom", "name": "助手", "content": "新正文"}], "active_system_prompt_id": "custom"}
+        response = self.post('/api/ai_config', {"ai_services": {}, "chat": chat})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['chat']['system_prompt'], '新正文')
+        self.assertFalse(response.json['persisted'])
+        before = copy.deepcopy(self.manager.config)
+        for path, payload in (
+            ('/api/ai_config', {"ai_services": {}, "chat": {"active_system_prompt_id": "missing"}}),
+            ('/api/config', {"features.chat.active_system_prompt_id": "missing"}),
+        ):
+            self.assertEqual(self.post(path, payload).status_code, 400)
+            self.assertEqual(self.manager.config, before)
+
     def test_invalid_ai_request_is_atomic(self):
         before = copy.deepcopy(self.manager.config)
         draft = self.manager.get_ai_config()

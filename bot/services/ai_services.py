@@ -10,6 +10,7 @@ import openai
 from loguru import logger
 from md2tgmd import escape
 
+from config.chat_prompts import resolve_chat_prompt
 from config.ai_config import resolve_image_model, resolve_text_model
 from config.settings import config_manager
 from bot.services import web_search
@@ -64,10 +65,7 @@ class AIServices:
             ai_config = self.config_manager.get_ai_config()
             provider, model = resolve_text_model(ai_config, role)
             if system_prompt is None:
-                system_prompt = self.config_manager.get(
-                    "features.chat.system_prompt",
-                    "你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。",
-                ) if role == "chat" else "请根据用户提供的资料和任务要求，用中文准确、简洁地回答。"
+                system_prompt = resolve_chat_prompt(self.config_manager.get("features.chat", {})) if role == "chat" else "请根据用户提供的资料和任务要求，用中文准确、简洁地回答。"
             messages = [{"role": "system", "content": system_prompt}] + history
             tools = []
             if role == "chat" and model.get("supports_tools") and user_id is not None:

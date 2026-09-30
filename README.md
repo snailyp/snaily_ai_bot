@@ -124,6 +124,15 @@ python -m webapp.app  # 仅启动 Web 控制面板
 
 ## 🔧 配置说明
 
+### 聊天系统提示词
+
+在 Web 控制台的 **AI 配置 → 系统提示词** 中，可添加、修改、删除多条提示词，并设定当前使用项；也可在默认聊天模型下方快速切换。所有操作先保留为草稿，点击「保存全部 AI 设置」后生效。
+
+- 提示词全局作用于日常聊天，不与单个模型或用户绑定；切换后下一次请求使用新提示词，不清空已有历史。
+- 后台任务、群聊总结和联网搜索总结的专用提示词不受影响。
+- 至少保留一条；删除当前项时需确认，随后选择剩余第一条。正文可以为空。
+- 旧 `system_prompt` 和环境变量 `CHAT_SYSTEM_PROMPT` 自动迁移为默认条目，兼容字段始终与当前正文同步。提示词库随配置保存到 Redis；若提示仅在内存生效，重启可能丢失，请重试保存。
+
 ### 功能配置
 
 ```json
@@ -131,7 +140,12 @@ python -m webapp.app  # 仅启动 Web 控制面板
   "features": {
     "chat": {
       "enabled": true,
-      "system_prompt": "你是一个友善的AI助手..."
+      "system_prompt": "你是一个友善的AI助手...",
+      "system_prompts": [
+        {"id": "default", "name": "默认助手", "content": "你是一个友善的AI助手..."},
+        {"id": "coding", "name": "编程助手", "content": "你是一个编程助手，请给出清晰的代码与解释。"}
+      ],
+      "active_system_prompt_id": "default"
     },
     "drawing": {
       "enabled": true,

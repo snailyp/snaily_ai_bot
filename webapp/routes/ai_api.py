@@ -92,6 +92,7 @@ def update_ai_config():
         if not runtime_queued:
             message += " 机器人未连接，启动后应用。"
         return jsonify(success=True, message=message, persisted=persisted,
+                       chat=config_manager.get("features.chat", {}),
                        runtime_queued=runtime_queued, ai_services=redact_ai_config(config_manager.get_ai_config()))
     except Exception as exc:
         return _error(exc, "保存 AI 配置")

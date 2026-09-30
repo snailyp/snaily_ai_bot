@@ -89,6 +89,9 @@
             this.secretRows = new WeakMap();
             this.suggestions.clear();
             this.chat = clone(config.features?.chat || {});
+            this.chat.system_prompts ||= [{ id: 'default', name: '默认提示词', content: this.chat.system_prompt ?? '你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。' }];
+            this.chat.active_system_prompt_id ||= this.chat.system_prompts[0].id;
+            if (!this.chat.system_prompts.some(item => item.id === this.selectedPrompt)) this.selectedPrompt = this.chat.system_prompts[0].id;
             for (const kind of ['text', 'drawing']) {
                 this.draft[kind].models.forEach(model => { model.parameters ||= {}; });
                 for (const collection of ['provider', 'model']) this.ensureSelection(kind, collection);
@@ -111,7 +114,7 @@
             if (!this.current(kind, collection)) this.selected[`${kind}-${collection}`] = this.items(kind, collection)[0]?.id || '';
         }
         newId() {
-            const ids = new Set([...this.draft.mcp.servers, ...this.draft.search.providers, ...['text', 'drawing'].flatMap(kind => [...this.draft[kind].providers, ...this.draft[kind].models])].map(item => item.id));
+            const ids = new Set([...this.chat.system_prompts, ...this.draft.mcp.servers, ...this.draft.search.providers, ...['text', 'drawing'].flatMap(kind => [...this.draft[kind].providers, ...this.draft[kind].models])].map(item => item.id));
             let id;
             do {
                 id = globalThis.crypto?.randomUUID?.() || `ai-${Date.now().toString(36)}-${(++this.sequence).toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -120,6 +123,36 @@
         }
 
         setup() {
+            for (const key of ['name', 'content']) {
+                $(`chat-prompt-${key}`).addEventListener('input', () => {
+                    this.chat.system_prompts.find(item => item.id === this.selectedPrompt)[key] = $(`chat-prompt-${key}`).value;
+                    this.renderPromptList();
+                    this.dirty();
+                });
+            }
+            $('add-chat-prompt').addEventListener('click', () => {
+                const item = { id: this.newId(), name: '新提示词', content: '' };
+                this.chat.system_prompts.push(item);
+                this.selectedPrompt = item.id;
+                this.renderPrompts(); this.dirty(); $('chat-prompt-name').focus();
+            });
+            $('remove-chat-prompt').addEventListener('click', () => {
+                if (this.chat.system_prompts.length <= 1) return;
+                const active = this.selectedPrompt === this.chat.active_system_prompt_id;
+                if (!window.confirm(`删除此提示词？${active ? '当前使用的提示词将切换为剩余第一条。' : ''}保存后生效。`)) return;
+                this.chat.system_prompts = this.chat.system_prompts.filter(item => item.id !== this.selectedPrompt);
+                this.selectedPrompt = this.chat.system_prompts[0].id;
+                if (active) this.chat.active_system_prompt_id = this.selectedPrompt;
+                this.renderPrompts(); this.dirty();
+            });
+            $('activate-chat-prompt').addEventListener('click', () => {
+                this.chat.active_system_prompt_id = this.selectedPrompt;
+                this.renderPrompts(); this.dirty();
+            });
+            $('chat-active-prompt').addEventListener('change', () => {
+                this.chat.active_system_prompt_id = $('chat-active-prompt').value;
+                this.renderPrompts(); this.dirty();
+            });
             for (const id of ['text-provider-timeout', 'drawing-provider-timeout', 'search-provider-timeout', 'mcp-timeout', 'mcp-server-timeout']) $(id).step = 'any';
             const tabs = [...document.querySelectorAll('[data-ai-tab]')];
             tabs.forEach((tab, index) => {
@@ -269,7 +302,40 @@
                 $(`ai-pane-${button.dataset.aiTab}`).hidden = !active;
             });
         }
+        renderPromptList() {
+            const list = $('chat-prompt-list');
+            list.replaceChildren();
+            const select = $('chat-active-prompt');
+            select.replaceChildren();
+            this.chat.system_prompts.forEach(item => {
+                select.add(new Option(item.name || '未命名提示词', item.id));
+                const button = node('button', 'ai-library-item');
+                button.type = 'button';
+                button.dataset.promptId = item.id;
+                button.setAttribute('aria-pressed', String(item.id === this.selectedPrompt));
+                button.append(node('span', 'ai-library-title', item.name || '未命名提示词'), node('small', '', item.id === this.chat.active_system_prompt_id ? '当前使用 · 保存后生效' : '未启用'));
+                button.addEventListener('click', () => {
+                    this.selectedPrompt = item.id; this.renderPrompts();
+                    [...list.children].find(child => child.dataset.promptId === item.id)?.focus({ preventScroll: true });
+                });
+                list.append(button);
+            });
+            select.value = this.chat.active_system_prompt_id;
+            $('chat-prompt-count').textContent = `${this.chat.system_prompts.length} 项`;
+        }
+        renderPrompts() {
+            this.renderPromptList();
+            const item = this.chat.system_prompts.find(prompt => prompt.id === this.selectedPrompt);
+            $('chat-prompt-name').value = item.name;
+            $('chat-prompt-content').value = item.content;
+            const active = item.id === this.chat.active_system_prompt_id;
+            $('chat-prompt-state').textContent = active ? '正在编辑 / 当前使用' : '正在编辑 / 未启用';
+            $('activate-chat-prompt').disabled = active;
+            $('remove-chat-prompt').disabled = this.chat.system_prompts.length <= 1;
+            $('remove-chat-prompt').title = this.chat.system_prompts.length <= 1 ? '至少保留一条提示词' : '';
+        }
         renderAll() {
+            this.renderPrompts();
             this.renderRoles();
             for (const kind of ['text', 'drawing']) {
                 this.renderList(kind, 'provider'); this.renderProvider(kind);
@@ -644,6 +710,13 @@
                     ai.mcp[key] = splitList($(id).value).map(value => { if (!/^-?\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error('用户 / 群聊白名单需填写有效的整数 ID。'); return Number(value); });
                 }
             } catch (error) { error.aiTab = 'mcp'; throw error; }
+            try {
+                const prompts = this.chat.system_prompts;
+                if (!prompts.length || prompts.some(item => !item.name.trim())) throw new Error('请为每条系统提示词填写名称。');
+                const active = prompts.find(item => item.id === this.chat.active_system_prompt_id);
+                if (!active) throw new Error('请选择有效的聊天系统提示词。');
+                this.chat.system_prompt = active.content;
+            } catch (error) { error.aiTab = 'prompts'; throw error; }
             let chat;
             try {
                 chat = { ...this.chat, history_enabled: $('chat-history-enabled').checked, history_max_length: this.number($('chat-history-max-length').value, '保留对话轮数', 1), auto_reply_private: $('chat-auto-reply-private').checked, short_message_threshold: this.number($('chat-short-message-threshold').value, '短消息阈值', 1) };

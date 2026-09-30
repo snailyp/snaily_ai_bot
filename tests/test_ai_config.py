@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import Mock, patch
 from typing import Any, Dict
 
+from config.chat_prompts import normalize_chat_prompts
 from config.ai_config import (
     merge_ai_secrets,
     normalize_ai_config,
@@ -56,6 +57,7 @@ def manager_class_without_singleton():
     module = ast.Module(body=[definition], type_ignores=[])
     namespace = {
         "Any": Any, "Dict": Dict, "json": json, "os": os, "secrets": secrets,
+        "normalize_chat_prompts": normalize_chat_prompts,
         "threading": threading, "deepcopy": deepcopy,
         "merge_ai_secrets": merge_ai_secrets, "normalize_ai_config": normalize_ai_config,
         "resolve_text_model": resolve_text_model, "validate_ai_config": validate_ai_config,
@@ -66,6 +68,15 @@ def manager_class_without_singleton():
 
 
 class NormalizationTests(unittest.TestCase):
+    def test_prompt_migration_preserves_legacy_text_and_is_idempotent(self):
+        for content in ('旧提示词\n第二行', ''):
+            original = {"system_prompt": content, "enabled": True}
+            result = normalize_chat_prompts(original)
+            self.assertEqual(result['system_prompts'][0]['content'], content)
+            self.assertEqual(result['active_system_prompt_id'], 'default')
+            self.assertEqual(normalize_chat_prompts(result), result)
+            self.assertNotIn('system_prompts', original)
+
     def test_defaults_are_fresh_and_idempotent(self):
         first = normalize_ai_config({})
         second = normalize_ai_config(first)
@@ -354,6 +365,37 @@ class ConfigManagerTests(unittest.TestCase):
             "features": {"chat": {"enabled": True, "system_prompt": "old"}, "drawing": {"daily_limit": 10}},
             "bot_info": {"name": "Original"}, "telegram": {"admin_user_ids": []},
         }
+
+    def test_prompt_library_switch_and_legacy_update(self):
+        self.manager.update_ai_config({}, chat={
+            "system_prompts": [{"id": "a", "name": "默认", "content": "A"}, {"id": "b", "name": "代码", "content": "B\n第二行"}],
+            "active_system_prompt_id": "a",
+        })
+        self.manager.apply_updates({"features.chat.active_system_prompt_id": "b"})
+        self.assertEqual(self.manager.get("features.chat.system_prompt"), "B\n第二行")
+        self.manager.save_config({"features": {"chat": {"system_prompt": "legacy edit"}}})
+        self.assertEqual(self.manager.get("features.chat.system_prompts")[1]["content"], "legacy edit")
+        self.assertEqual(json.loads(self.manager.redis_client.set.call_args.args[1]), self.manager.config)
+
+    def test_invalid_prompt_updates_are_atomic_across_entrypoints(self):
+        self.manager.update_ai_config({})
+        before = deepcopy(self.manager.config)
+        for chat in (
+            {"system_prompts": []}, {"active_system_prompt_id": "missing"},
+            {"system_prompts": [{"id": "default", "name": " ", "content": "x"}]},
+            {"system_prompts": [{"id": "default", "name": "a", "content": 1}]},
+            {"system_prompts": [{"id": "default", "name": "a", "content": ""}] * 2},
+        ):
+            for update in (
+                lambda: self.manager.update_ai_config({}, chat=chat),
+                lambda: self.manager.apply_updates({f"features.chat.{key}": value for key, value in chat.items()}),
+                lambda: self.manager.save_config({"features": {"chat": chat}}),
+            ):
+                self.manager.redis_client.reset_mock()
+                with self.assertRaises(ValueError):
+                    update()
+                self.assertEqual(self.manager.config, before)
+                self.manager.redis_client.set.assert_not_called()
 
     def test_getters_return_independent_snapshots(self):
         returned = self.manager.get_ai_config()

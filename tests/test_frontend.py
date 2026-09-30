@@ -97,7 +97,8 @@ class FrontendSmoke(unittest.TestCase):
         self.memory_only = False
         self.page = self.browser.new_page(viewport={"width": 1440, "height": 1050})
         self.page.on('pageerror', lambda error: self.errors.append(str(error)))
-        self.page.on('dialog', lambda dialog: dialog.dismiss())
+        self.dismiss_dialog = lambda dialog: dialog.dismiss()
+        self.page.on('dialog', self.dismiss_dialog)
         self.page.route('**/*', self.route)
 
     def tearDown(self):
@@ -159,6 +160,42 @@ class FrontendSmoke(unittest.TestCase):
         self.page.locator(f'#{form} button[type="submit"]').click()
         expect(self.page.locator(f'#{form} .save-state')).to_have_text('✓ 设置已保存')
 
+    def test_prompt_library_crud_and_persistence(self):
+        self.open('ai-config')
+        self.page.locator('#ai-tab-prompts').click()
+        expect(self.page.locator('#remove-chat-prompt')).to_be_disabled()
+        self.page.locator('#chat-prompt-content').fill('默认正文')
+        self.page.locator('#add-chat-prompt').click()
+        self.page.locator('#chat-prompt-name').fill('<b>编程助手</b>')
+        self.page.locator('#chat-prompt-content').fill('第一行\n第二行 <script>')
+        expect(self.page.locator('#chat-active-prompt')).to_have_value('default')
+        self.page.locator('#chat-prompt-list button').first.click()
+        expect(self.page.locator('#chat-prompt-content')).to_have_value('默认正文')
+        self.page.locator('#chat-prompt-list button').last.click()
+        expect(self.page.locator('#chat-prompt-content')).to_have_value('第一行\n第二行 <script>')
+        self.page.locator('#activate-chat-prompt').click()
+        self.assertEqual(self.posts, [])
+        self.save('ai-config-form')
+        self.assertEqual(self.config['features']['chat']['system_prompt'], '第一行\n第二行 <script>')
+        self.page.reload()
+        self.page.locator('#ai-tab-prompts').click()
+        expect(self.page.locator('#chat-prompt-list button')).to_have_count(2)
+        self.page.locator('#chat-prompt-list button').last.click()
+        self.page.locator('#remove-chat-prompt').click()  # 默认取消确认。
+        expect(self.page.locator('#chat-prompt-list button')).to_have_count(2)
+        self.page.remove_listener('dialog', self.dismiss_dialog)
+        self.page.on('dialog', lambda dialog: dialog.accept())
+        self.page.locator('#remove-chat-prompt').click()
+        expect(self.page.locator('#chat-active-prompt')).to_have_value('default')
+        expect(self.page.locator('#remove-chat-prompt')).to_be_disabled()
+        self.fail = '/api/ai_config'
+        self.page.locator('#ai-config-form button[type="submit"]').click()
+        expect(self.page.locator('#ai-validation')).to_be_visible()
+        expect(self.page.locator('#chat-prompt-content')).to_have_value('默认正文')
+        self.fail = None
+        self.save('ai-config-form')
+        self.assertEqual(len(self.config['features']['chat']['system_prompts']), 1)
+
     def test_layout_and_fields(self):
         self.open()
         ids = self.page.locator('[id]').evaluate_all('(elements) => elements.map(e => e.id)')
@@ -172,7 +209,7 @@ class FrontendSmoke(unittest.TestCase):
                 self.navigate(view)
                 self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'), f'Overflow {width}/{view}')
             self.navigate('ai-config')
-            for tab in ['providers', 'models', 'drawing', 'mcp', 'search', 'preferences']:
+            for tab in ['providers', 'models', 'drawing', 'mcp', 'search', 'prompts', 'preferences']:
                 self.page.locator(f'#ai-tab-{tab}').click()
                 self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'), f'Overflow {width}/AI/{tab}')
             self.navigate('overview')

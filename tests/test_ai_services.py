@@ -35,6 +35,23 @@ class AIServicesTests(unittest.IsolatedAsyncioTestCase):
                         reconcile=AsyncMock(), aclose=AsyncMock())
         self.service = service_module.AIServices(self.manager, self.text, self.images, self.mcp)
 
+    async def test_prompt_switch_preserves_history_and_explicit_overrides(self):
+        self.manager.update_ai_config({}, chat={
+            "system_prompts": [{"id": "a", "name": "A", "content": "first"}, {"id": "b", "name": "B", "content": "second"}],
+            "active_system_prompt_id": "a",
+        })
+        history = [{"role": "user", "content": "hi"}]
+        await self.service.chat_completion(history)
+        self.assertEqual(self.text.complete.call_args.args[2][0]["content"], "first")
+        self.manager.apply_updates({"features.chat.active_system_prompt_id": "b"})
+        await self.service.chat_completion(history)
+        self.assertEqual(self.text.complete.call_args.args[2], [{"role": "system", "content": "second"}] + history)
+        self.assertEqual(len(history), 1)
+        await self.service.chat_completion(history, system_prompt="")
+        self.assertEqual(self.text.complete.call_args.args[2][0]["content"], "")
+        await self.service.chat_completion(history, role="task")
+        self.assertNotEqual(self.text.complete.call_args.args[2][0]["content"], "second")
+
     async def test_chat_uses_chat_model_and_passes_user_context(self):
         await self.service.chat_completion([{"role": "user", "content": "hi"}], user_id=42, chat_id=99)
         provider, model, _ = self.text.complete.call_args.args

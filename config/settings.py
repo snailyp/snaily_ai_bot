@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Dict
 import certifi
 
+from config.chat_prompts import normalize_chat_prompts
 from config.ai_config import (
     merge_ai_secrets,
     normalize_ai_config,
@@ -58,8 +59,8 @@ class ConfigManager:
                 self.redis_client = redis.from_url(
                     redis_url,
                     decode_responses=True,
-                    socket_timeout=5,
-                    socket_connect_timeout=5,
+                    socket_timeout=30,
+                    socket_connect_timeout=10,
                     ssl_ca_certs=certifi.where(),
                     ssl_cert_reqs="required",
                     ssl_check_hostname=True,
@@ -268,6 +269,7 @@ class ConfigManager:
                 candidate["ai_services"] = validate_ai_config(self._apply_search_env(
                     normalize_ai_config(candidate.get("ai_services", {}))
                 ))
+                candidate.setdefault("features", {})["chat"] = normalize_chat_prompts(candidate.get("features", {}).get("chat", {}))
                 with self._lock:
                     self.config = candidate
                 return True
@@ -285,7 +287,8 @@ class ConfigManager:
             saved = bool(self.redis_client.set(
                 "app_config", json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
             ))
-        except Exception:
+        except Exception as e:
+            logger.error(e)
             # Redis exceptions may include a URL/password: never echo them here.
             logger.warning("保存配置到 Redis 失败，配置仅在内存中更新")
             return False
@@ -396,6 +399,7 @@ class ConfigManager:
                 },
             }
 
+            candidate["features"]["chat"] = normalize_chat_prompts(candidate["features"]["chat"])
             self.config = candidate
             logger.info("配置从环境变量加载成功")
 
@@ -533,12 +537,14 @@ class ConfigManager:
         if not isinstance(chat, dict):
             raise ValueError("features.chat: must be an object")
         allowed = {
-            "enabled", "system_prompt", "history_enabled", "history_max_length",
+            "enabled", "system_prompt", "system_prompts", "active_system_prompt_id", "history_enabled", "history_max_length",
             "auto_reply_private", "short_message_threshold",
         }
         if chat.keys() - allowed:
             raise ValueError("features.chat: contains an unsupported field")
         for name, value in chat.items():
+            if name in {"system_prompts", "active_system_prompt_id"}:
+                continue  # 合并后统一校验列表与启用 ID 的引用关系。
             if name in {"enabled", "history_enabled", "auto_reply_private"}:
                 if type(value) is not bool:
                     raise ValueError("features.chat: flags must be booleans")
@@ -564,6 +570,10 @@ class ConfigManager:
             ):
                 raise ValueError("ai_services: legacy fields cannot be updated after migration")
         candidate["ai_services"] = validate_ai_config(merge_ai_secrets(current, incoming))
+        features = candidate.setdefault("features", {})
+        chat = features.get("chat", {})
+        self._validate_chat(chat)
+        features["chat"] = normalize_chat_prompts(chat, self.config.get("features", {}).get("chat"))
         return candidate
 
     def _candidate_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:
