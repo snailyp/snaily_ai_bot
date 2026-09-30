@@ -47,6 +47,125 @@ def _as_dict(item: Any) -> dict:
     return item if isinstance(item, dict) else item.model_dump(exclude_none=True)
 
 
+def _api_error_field(exc: Exception, field: str) -> bool:
+    """Return whether an API status error explicitly rejects one request field."""
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return False
+    if body.get("param") == field:
+        return True
+    error = body.get("error")
+    return isinstance(error, dict) and error.get("param") == field
+
+
+def _api_error_hint(exc: Exception) -> str:
+    """Expose only bounded protocol metadata; never copy an upstream message."""
+    status = getattr(exc, "status_code", None)
+    body = getattr(exc, "body", None)
+    if not isinstance(status, int):
+        return ""
+    code = body.get("code") if isinstance(body, dict) else None
+    param = body.get("param") if isinstance(body, dict) else None
+    if not code and isinstance(body, dict) and isinstance(body.get("error"), dict):
+        code = body["error"].get("code")
+        param = param or body["error"].get("param")
+    parts = [f"HTTP {status}"]
+    for label, value in (("code", code), ("param", param)):
+        if isinstance(value, str) and len(value) <= 64 and value.replace("_", "").replace("-", "").isalnum():
+            parts.append(f"{label}={value}")
+    return f"（{', '.join(parts)}）"
+
+
+def _api_error_code(exc: Exception) -> Any:
+    body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        return None
+    code = body.get("code")
+    if not code and isinstance(body.get("error"), dict):
+        code = body["error"].get("code")
+    return code
+
+
+def _response_from_sse(body: str) -> dict:
+    """部分兼容接口即使未请求流式也返回 SSE；只接收完整终态，不拼接增量。"""
+    response = None
+    event_type = ""
+    data = []
+    for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n") + [""]:
+        if line:
+            field, _, value = line.partition(":")
+            value = value[1:] if value.startswith(" ") else value
+            if field == "event":
+                event_type = value
+            elif field == "data":
+                data.append(value)
+            continue
+        payload = "\n".join(data)
+        kind = event_type
+        data, event_type = [], ""
+        if not payload:
+            continue
+        if payload == "[DONE]":
+            break
+        try:
+            event = json.loads(payload)
+        except ValueError:
+            raise TextGenerationError("模型返回的 Responses 事件数据格式无效，请检查接口协议。") from None
+        if not isinstance(event, dict):
+            raise TextGenerationError("模型返回的 Responses 事件数据格式无效，请检查接口协议。")
+        kind = event.get("type") or kind
+        if kind in ("error", "response.failed"):
+            raise TextGenerationError("模型返回 Responses 失败事件，请检查模型及提供商配置。")
+        if kind == "response.incomplete":
+            raise TextGenerationError("模型回复未完成，可能达到输出额度上限。")
+        if kind == "response.completed":
+            response = event.get("response")
+            if not isinstance(response, dict):
+                raise TextGenerationError("模型返回的 Responses 终态数据格式无效。")
+    if response is None:
+        raise TextGenerationError("模型未返回完整的 Responses 结果，请检查接口协议或事件流是否中断。")
+    return response
+
+
+def _responses_output(response: Any) -> list[dict]:
+    if isinstance(response, str):
+        try:
+            response = json.loads(response)
+        except ValueError:
+            response = _response_from_sse(response)
+    if isinstance(response, dict):
+        output, status, error = response.get("output"), response.get("status"), response.get("error")
+    else:
+        output = getattr(response, "output", None)
+        status, error = getattr(response, "status", None), getattr(response, "error", None)
+    if status == "incomplete":
+        raise TextGenerationError("模型回复未完成，可能达到输出额度上限。")
+    if error or status not in (None, "completed"):
+        raise TextGenerationError("模型未成功完成 Responses 请求，请检查模型及提供商配置。")
+    if not isinstance(output, list):
+        raise TextGenerationError("模型返回的 Responses 数据缺少有效的 output，请检查接口协议。")
+    try:
+        output = [_as_dict(item) for item in output]
+    except (AttributeError, TypeError, ValueError):
+        raise TextGenerationError("模型返回的 Responses output 数据格式无效。") from None
+    for item in output:
+        if not isinstance(item, dict) or not isinstance(item.get("type"), str):
+            raise TextGenerationError("模型返回的 Responses output 数据格式无效。")
+        if item["type"] == "message":
+            content = item.get("content")
+            if not isinstance(content, list) or any(
+                not isinstance(part, dict) or not isinstance(part.get("type"), str) or
+                (part["type"] == "output_text" and not isinstance(part.get("text"), str))
+                for part in content
+            ):
+                raise TextGenerationError("模型返回的 Responses 文本数据格式无效。")
+        if item["type"] == "function_call" and any(
+            not isinstance(item.get(key), str) or not item[key] for key in ("name", "call_id")
+        ):
+            raise TextGenerationError("模型返回的 Responses 工具调用数据格式无效。")
+    return output
+
+
 class TextGenerator:
     def __init__(self, client_factory=None):
         self.client_factory = client_factory or openai.AsyncOpenAI
@@ -87,8 +206,23 @@ class TextGenerator:
                                 for tool in tools_by_name.values()
                             ]
                             kwargs["include"] = ["reasoning.encrypted_content"]
-                        response = await client.responses.create(**kwargs)
-                        output = [_as_dict(item) for item in response.output]
+                        create = getattr(getattr(client, "responses", None), "create", None)
+                        if not callable(create):
+                            raise TextGenerationError("当前 OpenAI SDK 不支持 Responses，请按 requirements.txt 更新依赖并重启服务。")
+                        try:
+                            response = await create(**kwargs)
+                        except openai.APIStatusError as exc:
+                            # A number of Responses-compatible gateways reject
+                            # OpenAI's optional `store` flag. It is safe to retry
+                            # once because the first request was rejected during
+                            # parameter validation, before generation started.
+                            if kwargs.get("store") is False and _api_error_field(exc, "store"):
+                                fallback_kwargs = dict(kwargs)
+                                fallback_kwargs.pop("store", None)
+                                response = await create(**fallback_kwargs)
+                            else:
+                                raise
+                        output = _responses_output(response)
                         calls = [item for item in output if item.get("type") == "function_call"]
                         text = "\n".join(
                             part.get("text", "") for item in output if item.get("type") == "message"
@@ -141,8 +275,13 @@ class TextGenerator:
             raise TextGenerationError("模型提供商请求过多或额度不足，请稍后再试。") from None
         except (openai.APITimeoutError, httpx.TimeoutException, asyncio.TimeoutError):
             raise TextGenerationError("模型请求超时，请稍后再试。") from None
-        except (openai.APIError, httpx.HTTPError):
-            raise TextGenerationError("模型请求失败，请检查接口类型、模型名称及已启用的参数。") from None
+        except (openai.APIError, httpx.HTTPError) as exc:
+            hint = _api_error_hint(exc)
+            if _api_error_code(exc) == "bad_response_body":
+                raise TextGenerationError(
+                    f"中转网关返回了无效的 Responses 响应{hint}，请确认该网关和模型支持 Responses 协议。"
+                ) from None
+            raise TextGenerationError(f"模型请求失败{hint}，请检查接口类型、模型名称及已启用的参数。") from None
 
     @staticmethod
     async def _execute_tool(call: dict, tools: dict, caller: Callable, timeout: float) -> str:

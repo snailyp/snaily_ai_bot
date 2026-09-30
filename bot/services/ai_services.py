@@ -14,7 +14,7 @@ from config.ai_config import resolve_image_model, resolve_text_model
 from config.settings import config_manager
 from bot.services.image_generation import ImageGenerator, ImageResult
 from bot.services.mcp_client import MCPClientManager
-from bot.services.text_generation import TextGenerator, client_options
+from bot.services.text_generation import TextGenerationError, TextGenerator, client_options
 
 
 class AIServices:
@@ -82,7 +82,8 @@ class AIServices:
             logger.info(f"AI 生成完成 - 用途: {role}, 用户: {user_id}, 回复长度: {len(reply)}")
             return escape(reply) if enable_md2tg else reply
         except Exception as exc:
-            logger.warning(f"AI 生成失败 - 用途: {role}, 错误类型: {type(exc).__name__}")
+            detail = f", 原因: {exc}" if isinstance(exc, TextGenerationError) else ""
+            logger.warning(f"AI 生成失败 - 用途: {role}, 错误类型: {type(exc).__name__}{detail}")
             # 后台摘要不能把错误提示当成成功摘要推送出去。
             if role != "chat":
                 return None

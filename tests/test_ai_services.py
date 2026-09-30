@@ -53,6 +53,22 @@ class AIServicesTests(unittest.IsolatedAsyncioTestCase):
         reply = await self.service.chat_completion([], 42)
         self.assertNotIn("secret-value", reply)
 
+    async def test_safe_generation_error_is_logged_with_reason(self):
+        reason = "模型返回的 Responses 事件流未完整结束。"
+        self.text.complete.side_effect = service_module.TextGenerationError(reason)
+        with patch.object(service_module.logger, "warning") as warning:
+            await self.service.chat_completion([], 42)
+        self.assertIn(reason, warning.call_args.args[0])
+        self.assertIn("TextGenerationError", warning.call_args.args[0])
+
+    async def test_unexpected_generation_error_details_are_not_logged(self):
+        self.text.complete.side_effect = AttributeError("secret-fixture")
+        with patch.object(service_module.logger, "warning") as warning:
+            reply = await self.service.chat_completion([], 42)
+        self.assertNotIn("secret-fixture", warning.call_args.args[0])
+        self.assertNotIn("secret-fixture", reply)
+        self.assertIn("AttributeError", warning.call_args.args[0])
+
     async def test_drawing_works_without_any_text_provider(self):
         self.manager.config["ai_services"]["text"] = {"providers": [], "models": [], "chat_model_id": "", "task_model_id": ""}
         image = await self.service.generate_image("cat", 42)

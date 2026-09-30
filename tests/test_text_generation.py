@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 from types import SimpleNamespace
 import unittest
 
@@ -90,6 +91,55 @@ class TextGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["input"][2], {"type": "function_call_output", "call_id": "call_1", "output": "晴朗"})
         self.assertEqual(len(called), 1)
         self.assertFalse(first["tools"][0]["strict"])
+
+    async def test_responses_accepts_mapping_and_json_text(self):
+        response = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "OK"}]}]}
+        for value in (response, json.dumps(response)):
+            with self.subTest(value_type=type(value).__name__):
+                client = FakeClient([value])
+                result = await TextGenerator(client.factory).complete(PROVIDER, {**MODEL, "api_type": "responses"}, [])
+                self.assertEqual(result, "OK")
+                self.assertTrue(client.closed)
+
+    async def test_responses_sse_preserves_unicode_line_separators(self):
+        text = "甲" + chr(0x85) + "乙" + chr(0x2028) + "丙" + chr(0x2029) + "丁"
+        event = {"type": "response.completed", "response": {"output": [
+            {"type": "message", "content": [{"type": "output_text", "text": text}]}]}}
+        for newline in ("\n", "\r\n", "\r"):
+            with self.subTest(newline=repr(newline)):
+                body = f"event: response.completed{newline}data: {json.dumps(event, ensure_ascii=False)}"
+                client = FakeClient([body])
+                result = await TextGenerator(client.factory).complete(PROVIDER, {**MODEL, "api_type": "responses"}, [])
+                self.assertEqual(result, text)
+
+    async def test_invalid_responses_output_is_safe_error(self):
+        invalid_outputs = [None, "secret-fixture", {}, [None], ["secret-fixture"], [{}],
+                           [{"type": "message", "content": None}], [{"type": "message", "content": [None]}],
+                           [{"type": "message", "content": [{"type": "output_text", "text": None}]}],
+                           [{"type": "function_call", "name": "server_lookup"}]]
+        for output in invalid_outputs:
+            with self.subTest(output=output):
+                client = FakeClient([SimpleNamespace(output=output)])
+                with self.assertRaises(TextGenerationError) as caught:
+                    await TextGenerator(client.factory).complete(PROVIDER, {**MODEL, "api_type": "responses"}, [])
+                self.assertNotIn("secret-fixture", str(caught.exception))
+                self.assertTrue(client.closed)
+
+    async def test_unfinished_responses_are_not_successful_text(self):
+        for status in ("failed", "incomplete", "in_progress", "queued", "cancelled"):
+            with self.subTest(status=status):
+                client = FakeClient([{"status": status, "output": [
+                    {"type": "message", "content": [{"type": "output_text", "text": "partial"}]}]}])
+                with self.assertRaises(TextGenerationError):
+                    await TextGenerator(client.factory).complete(PROVIDER, {**MODEL, "api_type": "responses"}, [])
+                self.assertTrue(client.closed)
+
+    async def test_sdk_without_responses_has_actionable_error(self):
+        client = FakeClient([])
+        del client.responses
+        with self.assertRaisesRegex(TextGenerationError, "SDK.*Responses"):
+            await TextGenerator(client.factory).complete(PROVIDER, {**MODEL, "api_type": "responses"}, [])
+        self.assertTrue(client.closed)
 
     async def test_chat_tool_result_and_invalid_arguments(self):
         for argument in ('{"city":1}', '{bad', '[]', '"text"'):

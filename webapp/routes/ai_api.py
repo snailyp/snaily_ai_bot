@@ -40,7 +40,8 @@ def _data():
 
 
 def _error(exc, operation):
-    logger.warning(f"{operation}失败: {type(exc).__name__}")
+    detail = f", 原因: {exc}" if isinstance(exc, (AIRequestError, TextGenerationError)) else ""
+    logger.warning(f"{operation}失败: {type(exc).__name__}{detail}")
     if isinstance(exc, (AIRequestError, TextGenerationError)):
         return jsonify(success=False, error=str(exc)), 400
     if isinstance(exc, openai.AuthenticationError):
