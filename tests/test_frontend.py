@@ -40,6 +40,7 @@ FIXTURE = {
         "welcome_message": {"enabled": True, "message": "欢迎 {user_name} 加入 {chat_title}！"},
         "history": {"cleanup_enabled": True, "cleanup_retention_days": 30},
         "hotspot_push": {"enabled": True, "push_schedule": "09:00", "telegram_push_chat_id": "@test", "sources": ["hackernews"], "keywords": ["AI"]},
+        "linuxdo_push": {"enabled": False, "period": "daily", "push_schedule": "09:30", "limit": 10, "telegram_push_chat_id": "", "feed_url": "", "ai_summary": False, "show_excerpt": True},
     },
     "logging": {"level": "INFO"},
     "webapp": {"port": 5000, "render_webhook_url": "https://example.invalid/deploy", "koyeb_api_token": "test-only", "koyeb_service_id": "test-service"},
@@ -306,6 +307,15 @@ class FrontendSmoke(unittest.TestCase):
             self.save(view + '-form')
         hotspot = [body for path, body in self.posts if path == '/api/config' and 'features.hotspot_push.keywords' in body][0]
         self.assertEqual(hotspot['features.hotspot_push.keywords'], ['AI', 'Python'])
+        self.navigate('hotspot-config')
+        self.page.locator('#linuxdo-period').select_option('weekly')
+        self.page.locator('#linuxdo-limit').fill('5')
+        self.page.locator('#linuxdo-feed-url').fill('https://rss.example/linuxdo/{period}')
+        self.save('linuxdo-config-form')
+        linuxdo = [body for path, body in self.posts if path == '/api/config' and 'features.linuxdo_push.period' in body][0]
+        self.assertEqual((linuxdo['features.linuxdo_push.period'], linuxdo['features.linuxdo_push.limit']), ('weekly', 5))
+        self.assertEqual(linuxdo['features.linuxdo_push.feed_url'], 'https://rss.example/linuxdo/{period}')
+        self.assertTrue(linuxdo['features.linuxdo_push.show_excerpt'])
 
     def test_failures_and_toggle_rollback(self):
         self.fail = '/api/config'

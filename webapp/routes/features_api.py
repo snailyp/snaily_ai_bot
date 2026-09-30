@@ -18,6 +18,7 @@ SUPPORTED_FEATURES = {
     "auto_summary",
     "welcome_message",
     "hotspot_push",
+    "linuxdo_push",
 }
 
 
@@ -40,7 +41,7 @@ def toggle_feature(feature):
 
         config_manager.set(f"features.{feature}.enabled", new_status)
         config_manager.save_config_to_redis()
-        if feature in {"auto_summary", "hotspot_push"}:
+        if feature in {"auto_summary", "hotspot_push", "linuxdo_push"}:
             _trigger_reschedule()
 
         logger.info(f"功能 {feature} 已{'启用' if new_status else '禁用'}")

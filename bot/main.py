@@ -47,6 +47,7 @@ from bot.handlers.common import (
 )
 from bot.handlers.draw import draw_command, draw_help_command
 from bot.handlers.hotspot_push import setup_hotspot_push_scheduler
+from bot.handlers.linuxdo_push import setup_linuxdo_push_scheduler
 from bot.handlers.summary import (
     setup_cleanup_scheduler,
     setup_summary_scheduler,
@@ -201,6 +202,9 @@ class TelegramBot:
 
         # 热点新闻推送定时任务
         await setup_hotspot_push_scheduler(self.application, self.scheduler)
+
+        # linux.do 热门帖推送定时任务
+        await setup_linuxdo_push_scheduler(self.application, self.scheduler)
 
         # Upstash/Redis 保活任务
         await setup_upstash_keepalive_scheduler(self.scheduler)

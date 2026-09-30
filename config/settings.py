@@ -382,6 +382,20 @@ class ConfigManager:
                             "TELEGRAM_PUSH_CHAT_ID", "-4656523535"
                         ),
                     },
+                    "linuxdo_push": {
+                        "enabled": self._env_bool("LINUXDO_PUSH_ENABLED", False),
+                        # 非法环境变量回退到默认值，避免之后每次保存配置都校验失败。
+                        "period": (lambda v: v if v in {"daily", "weekly", "monthly", "quarterly", "yearly", "all"} else "daily")(
+                            os.getenv("LINUXDO_PUSH_PERIOD", "daily").strip().lower()
+                        ),
+                        "push_schedule": os.getenv("LINUXDO_PUSH_SCHEDULE", "09:30").strip() or "09:30",
+                        "limit": max(1, min(30, self._env_int("LINUXDO_PUSH_LIMIT", 10))),
+                        # 留空时沿用热点推送的 TELEGRAM_PUSH_CHAT_ID。
+                        "telegram_push_chat_id": os.getenv("LINUXDO_PUSH_CHAT_ID", ""),
+                        "feed_url": os.getenv("LINUXDO_FEED_URL", ""),
+                        "ai_summary": self._env_bool("LINUXDO_AI_SUMMARY", False),
+                        "show_excerpt": self._env_bool("LINUXDO_SHOW_EXCERPT", True),
+                    },
                 },
                 "webapp": {
                     "host": os.getenv("WEBAPP_HOST", "0.0.0.0"),
@@ -559,6 +573,29 @@ class ConfigManager:
         if type(limit) is not int or limit < 0:
             raise ValueError("features.drawing.daily_limit: must be a nonnegative integer")
 
+    @staticmethod
+    def _validate_linuxdo_push(push: Any) -> None:
+        if not isinstance(push, dict):
+            raise ValueError("features.linuxdo_push: must be an object")
+        for name in ("enabled", "ai_summary", "show_excerpt"):
+            if name in push and type(push[name]) is not bool:
+                raise ValueError(f"features.linuxdo_push.{name}: must be a boolean")
+        if push.get("period", "daily") not in {"daily", "weekly", "monthly", "quarterly", "yearly", "all"}:
+            raise ValueError("features.linuxdo_push.period: must be daily/weekly/monthly/quarterly/yearly/all")
+        limit = push.get("limit", 10)
+        if type(limit) is not int or not 1 <= limit <= 30:
+            raise ValueError("features.linuxdo_push.limit: must be an integer between 1 and 30")
+        schedule = push.get("push_schedule", "09:30")
+        parts = schedule.split(":") if isinstance(schedule, str) else []
+        if len(parts) != 2 or not all(part.isdigit() for part in parts) or int(parts[0]) > 23 or int(parts[1]) > 59:
+            raise ValueError("features.linuxdo_push.push_schedule: must use HH:MM")
+        for name in ("telegram_push_chat_id", "feed_url"):
+            if not isinstance(push.get(name, ""), str):
+                raise ValueError(f"features.linuxdo_push.{name}: must be a string")
+        feed_url = push.get("feed_url", "").strip()
+        if feed_url and not feed_url.lower().startswith(("http://", "https://")):
+            raise ValueError("features.linuxdo_push.feed_url: must start with http:// or https://")
+
     def _validate_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
         incoming = candidate.get("ai_services", {})
         if not isinstance(incoming, dict):
@@ -574,6 +611,8 @@ class ConfigManager:
         chat = features.get("chat", {})
         self._validate_chat(chat)
         features["chat"] = normalize_chat_prompts(chat, self.config.get("features", {}).get("chat"))
+        if "linuxdo_push" in features:
+            self._validate_linuxdo_push(features["linuxdo_push"])
         return candidate
 
     def _candidate_updates(self, updates: Dict[str, Any]) -> Dict[str, Any]:

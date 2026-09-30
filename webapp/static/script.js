@@ -179,6 +179,9 @@ class BotControlPanel {
         
         // 更新热点推送设置表单
         this.updateHotspotPushConfigForm();
+
+        // 更新 linux.do 热门推送表单
+        this.updateLinuxDoConfigForm();
         
         // 更新历史记录设置表单
         this.updateHistoryConfigForm();
@@ -230,6 +233,21 @@ class BotControlPanel {
         this.setFormValue('hotspot-push-chat-id', hotspotConfig.telegram_push_chat_id || '');
         this.setFormValue('hotspot-sources', (hotspotConfig.sources || []).join(','));
         this.setFormValue('hotspot-keywords', (hotspotConfig.keywords || []).join(','));
+    }
+
+    // 更新 linux.do 热门推送表单
+    updateLinuxDoConfigForm() {
+        const config = this.config.features?.linuxdo_push || {};
+        const checks = { 'linuxdo-push-enabled': config.enabled ?? false, 'linuxdo-show-excerpt': config.show_excerpt ?? true, 'linuxdo-ai-summary': config.ai_summary ?? false };
+        Object.entries(checks).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.checked = Boolean(value);
+        });
+        this.setFormValue('linuxdo-period', config.period || 'daily');
+        this.setFormValue('linuxdo-push-schedule', config.push_schedule || '09:30');
+        this.setFormValue('linuxdo-limit', config.limit || 10);
+        this.setFormValue('linuxdo-chat-id', config.telegram_push_chat_id || '');
+        this.setFormValue('linuxdo-feed-url', config.feed_url || '');
     }
 
     // 更新历史记录设置表单
@@ -385,6 +403,16 @@ class BotControlPanel {
             });
         }
 
+        // linux.do 热门推送表单
+        const linuxdoForm = document.getElementById('linuxdo-config-form');
+        if (linuxdoForm) {
+            linuxdoForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (e.submitter?.disabled) return;
+                this.saveLinuxDoConfig();
+            });
+        }
+
         // 历史记录设置表单
         const historyForm = document.getElementById('history-config-form');
         if (historyForm) {
@@ -504,6 +532,35 @@ class BotControlPanel {
             await this.updateConfig(configData);
             this.markSaved('hotspot-config-form');
             this.showNotification('热点推送设置已保存', 'success');
+        } catch (error) {
+            this.showNotification('保存失败: ' + error.message, 'error');
+        } finally {
+            this.setButtonLoading(button, false);
+        }
+    }
+
+    // 保存 linux.do 热门推送设置
+    async saveLinuxDoConfig() {
+        const button = document.querySelector('#linuxdo-config-form button[type="submit"]');
+        const limit = parseInt(document.getElementById('linuxdo-limit').value, 10);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 30) {
+            this.showNotification('推送条数需为 1 至 30 的整数', 'error');
+            return;
+        }
+        this.setButtonLoading(button, true);
+        try {
+            await this.updateConfig({
+                'features.linuxdo_push.enabled': document.getElementById('linuxdo-push-enabled').checked,
+                'features.linuxdo_push.period': document.getElementById('linuxdo-period').value,
+                'features.linuxdo_push.push_schedule': document.getElementById('linuxdo-push-schedule').value || '09:30',
+                'features.linuxdo_push.limit': limit,
+                'features.linuxdo_push.telegram_push_chat_id': document.getElementById('linuxdo-chat-id').value.trim(),
+                'features.linuxdo_push.feed_url': document.getElementById('linuxdo-feed-url').value.trim(),
+                'features.linuxdo_push.show_excerpt': document.getElementById('linuxdo-show-excerpt').checked,
+                'features.linuxdo_push.ai_summary': document.getElementById('linuxdo-ai-summary').checked
+            });
+            this.markSaved('linuxdo-config-form');
+            this.showNotification('linux.do 推送设置已保存', 'success');
         } catch (error) {
             this.showNotification('保存失败: ' + error.message, 'error');
         } finally {
