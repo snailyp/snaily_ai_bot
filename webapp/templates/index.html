@@ -159,11 +159,11 @@
                 <section class="panel ai-collection"><div class="panel-heading"><div><p class="eyebrow">PROMPT LIBRARY / 对话的起点</p><h2>给每一种对话，留一个角色。</h2></div><span class="subtle-badge" id="chat-prompt-count"></span></div>
                     <p class="panel-description">选择条目仅切换编辑对象。「设为当前使用」后保存，下一次聊天即生效；不会清空历史，也不影响后台任务。</p>
                     <div class="ai-editor-layout"><div class="ai-library"><div class="ai-library-list" id="chat-prompt-list" aria-label="系统提示词列表"></div><button class="btn btn-secondary ai-add" type="button" id="add-chat-prompt">＋ 添加提示词</button></div>
-                        <fieldset class="ai-editor"><legend class="sr-only">编辑系统提示词</legend><div class="ai-editor-heading"><span class="tiny-label" id="chat-prompt-state"></span><button class="btn btn-quiet danger-text" type="button" id="remove-chat-prompt">删除提示词</button></div>
+                        <div class="ai-editor-body"><fieldset class="ai-editor"><legend class="sr-only">编辑系统提示词</legend><div class="ai-editor-heading"><span class="tiny-label" id="chat-prompt-state"></span><button class="btn btn-quiet danger-text" type="button" id="remove-chat-prompt">删除提示词</button></div>
                             {{ field('chat-prompt-name','提示词名称',placeholder='例如：编程助手') }}
                             <div class="field"><label for="chat-prompt-content">系统提示词正文</label><textarea id="chat-prompt-content" rows="12" placeholder="描述助手的角色、回答方式与约束…"></textarea><small>支持多行纯文本；允许留空。不进行模板变量替换。</small></div>
                             <button class="btn btn-secondary" type="button" id="activate-chat-prompt">设为当前使用</button>
-                        </fieldset>
+                        </fieldset></div>
                     </div>
                 </section>
             </div>

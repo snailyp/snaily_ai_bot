@@ -217,6 +217,7 @@ code { font: 11px var(--mono); color: #976342; padding: 3px 6px; border-radius: 
 .ai-role > label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 10px; }
 .ai-role > small { margin-top: 9px; font-size: 10px; overflow-wrap: anywhere; }
 .ai-role select { width: 100%; text-overflow: ellipsis; }
+.ai-role > small + label { margin-top: 18px; }
 .ai-tabs { display: flex; border-bottom: 1px solid #cccec2; margin: 28px 0 22px; gap: 5px; overflow-x: auto; scrollbar-width: thin; }
 .ai-tab { position: relative; flex: 1 0 auto; background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; padding: 15px 15px 13px; font-size: 12px; white-space: nowrap; }
 .ai-tab > span { font: 9px var(--mono); margin-right: 10px; opacity: .7; }
@@ -226,6 +227,7 @@ code { font: 11px var(--mono); color: #976342; padding: 3px 6px; border-radius: 
 .ai-tab:focus-visible { outline-offset: -4px; }
 .ai-pane > .panel { margin-bottom: 22px; }
 .ai-collection > .panel-heading { padding-bottom: 20px; margin-bottom: 0; border-bottom: 1px solid var(--line); }
+.ai-collection > .panel-description { margin: 16px 0 0; }
 .ai-editor-layout { display: grid; grid-template-columns: minmax(160px, 210px) minmax(0, 1fr); }
 .ai-library { min-width: 0; padding: 22px 22px 0 0; border-right: 1px solid var(--line); }
 .ai-library-list { display: flex; flex-direction: column; gap: 7px; }
