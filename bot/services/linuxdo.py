@@ -11,7 +11,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import List, Optional
 
-import httpx
+from curl_cffi.requests import AsyncSession
+from curl_cffi.requests.exceptions import RequestException
 
 PERIODS = {
     "daily": "今日",
@@ -106,22 +107,29 @@ def parse_feed(xml_text: str, limit: int = 10) -> List[LinuxDoTopic]:
     return [topic for topic in topics if not topic.pinned][: max(1, limit)]
 
 
-USER_AGENT = "Mozilla/5.0 (compatible; SnailyBot/1.0; +https://linux.do/top.rss)"
+USER_AGENT = "Mozilla/5.0"
+# 用 curl_cffi 模拟 Chrome 的 TLS/HTTP2 指纹，绕过 Cloudflare 对普通 HTTP 客户端的拦截。
+IMPERSONATE = "chrome124"
 
 
 async def fetch_top_topics(
     period: str = "daily", limit: int = 10, feed_url: str = "", timeout: float = 30,
-    *, transport: Optional[httpx.AsyncBaseTransport] = None,
+    *, session: Optional[AsyncSession] = None,
 ) -> List[LinuxDoTopic]:
-    """抓取并解析热门帖；任何网络或格式问题都统一抛出 LinuxDoFeedError。"""
+    """抓取并解析热门帖；任何网络或格式问题都统一抛出 LinuxDoFeedError。
+
+    session 仅供测试注入；传入时由调用方负责关闭。
+    """
     url = build_feed_url(period, feed_url)
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.1"}
+    kwargs = {"impersonate": IMPERSONATE, "headers": {"User-Agent": USER_AGENT},
+              "timeout": timeout, "allow_redirects": True}
     try:
-        async with httpx.AsyncClient(
-            timeout=timeout, transport=transport, headers=headers, follow_redirects=True,
-        ) as client:
-            response = await client.get(url)
-    except httpx.HTTPError as exc:
+        if session is not None:
+            response = await session.get(url, **kwargs)
+        else:
+            async with AsyncSession() as own_session:
+                response = await own_session.get(url, **kwargs)
+    except RequestException as exc:
         raise LinuxDoFeedError(f"请求 {url} 失败: {type(exc).__name__}") from exc
 
     if response.status_code == 403 and "just a moment" in response.text[:2048].lower():

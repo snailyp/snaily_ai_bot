@@ -1,4 +1,4 @@
-"""Offline tests for linux.do top-topic push; uses httpx.MockTransport and mocks only."""
+"""Offline tests for linux.do top-topic push; uses a fake curl_cffi session and mocks only."""
 
 import importlib
 import sys
@@ -6,11 +6,12 @@ from types import ModuleType
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-import httpx
 from apscheduler.jobstores.base import JobLookupError
 
 from test_ai_config import manager_class_without_singleton
 from test_web_search import assert_valid_markdown_v2
+from curl_cffi.requests.exceptions import Timeout
+
 from bot.services import linuxdo
 from bot.utils.helpers import to_markdown_v2
 
@@ -47,12 +48,17 @@ FEED = """<?xml version="1.0" encoding="UTF-8" ?>
 </rss>""" % ("长" * 300)
 
 
-def transport_for(status=200, text=FEED, seen=None):
-    def handler(request):
-        if seen is not None:
-            seen.append(request)
-        return httpx.Response(status, text=text)
-    return httpx.MockTransport(handler)
+class FakeSession:
+    """Stands in for curl_cffi AsyncSession: records get() calls and returns a canned response."""
+
+    def __init__(self, status=200, text=FEED, error=None):
+        self.status, self.text, self.error, self.calls = status, text, error, []
+
+    async def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if self.error is not None:
+            raise self.error
+        return Mock(status_code=self.status, text=self.text)
 
 
 class FeedTests(unittest.IsolatedAsyncioTestCase):
@@ -82,20 +88,19 @@ class FeedTests(unittest.IsolatedAsyncioTestCase):
             linuxdo.build_feed_url("daily", "file:///etc/passwd")
 
     async def test_fetch_request_and_errors(self):
-        seen = []
-        topics = await linuxdo.fetch_top_topics("yearly", 5, transport=transport_for(seen=seen))
-        self.assertEqual(str(seen[0].url), "https://linux.do/top.rss?period=yearly")
-        self.assertIn("rss+xml", seen[0].headers["accept"])
+        session = FakeSession()
+        topics = await linuxdo.fetch_top_topics("yearly", 5, timeout=7, session=session)
+        url, kwargs = session.calls[0]
+        self.assertEqual(url, "https://linux.do/top.rss?period=yearly")
+        self.assertEqual((kwargs["impersonate"], kwargs["timeout"]), (linuxdo.IMPERSONATE, 7))
+        self.assertEqual(kwargs["headers"]["User-Agent"], linuxdo.USER_AGENT)
         self.assertEqual(len(topics), 2)
         with self.assertRaisesRegex(linuxdo.LinuxDoFeedError, "Cloudflare"):
-            await linuxdo.fetch_top_topics(transport=transport_for(403, "<title>Just a moment...</title>"))
+            await linuxdo.fetch_top_topics(session=FakeSession(403, "<title>Just a moment...</title>"))
         with self.assertRaisesRegex(linuxdo.LinuxDoFeedError, "HTTP 500"):
-            await linuxdo.fetch_top_topics(transport=transport_for(500, "oops"))
-
-        def boom(request):
-            raise httpx.ConnectTimeout("slow", request=request)
-        with self.assertRaisesRegex(linuxdo.LinuxDoFeedError, "ConnectTimeout"):
-            await linuxdo.fetch_top_topics(transport=httpx.MockTransport(boom))
+            await linuxdo.fetch_top_topics(session=FakeSession(500, "oops"))
+        with self.assertRaisesRegex(linuxdo.LinuxDoFeedError, "Timeout"):
+            await linuxdo.fetch_top_topics(session=FakeSession(error=Timeout("slow")))
 
     def test_message_is_valid_markdown_v2(self):
         topics = linuxdo.parse_feed(FEED)
