@@ -1,7 +1,7 @@
 # coding=utf-8
 """linux.do 热门帖定时推送。"""
 import asyncio
-from typing import Optional
+from typing import List, Optional
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -16,17 +16,18 @@ from bot.services.linuxdo import (
     format_topics_message,
     normalize_period,
 )
-from bot.utils.helpers import send_markdown, split_text
+from bot.utils.helpers import parse_chat_ids, send_markdown, split_text
 from config.settings import config_manager
 
 JOB_ID = "linuxdo_push_job"
 SUMMARY_INPUT_CHARS = 2000
 
 
-def _push_chat_id(config: dict) -> str:
-    """未单独配置时沿用热点推送的频道，减少重复设置。"""
-    chat_id = str(config.get("telegram_push_chat_id") or "").strip()
-    return chat_id or str(config_manager.get("features.hotspot_push.telegram_push_chat_id", "") or "").strip()
+def _push_chat_ids(config: dict) -> List[str]:
+    """支持英文逗号分隔多个 ID；未单独配置时沿用热点推送的频道，减少重复设置。"""
+    return parse_chat_ids(config.get("telegram_push_chat_id")) or parse_chat_ids(
+        config_manager.get("features.hotspot_push.telegram_push_chat_id", "")
+    )
 
 
 async def _summarize(topic: LinuxDoTopic) -> str:
@@ -41,8 +42,8 @@ async def _summarize(topic: LinuxDoTopic) -> str:
 async def send_linuxdo_push(application: Application, period: Optional[str] = None) -> int:
     """抓取并推送一次热门帖，返回推送的帖子数；失败只记录日志，不影响调度器。"""
     config = config_manager.get("features.linuxdo_push", {}) or {}
-    chat_id = _push_chat_id(config)
-    if not chat_id:
+    chat_ids = _push_chat_ids(config)
+    if not chat_ids:
         logger.warning("未配置 linux.do 推送频道 ID，跳过推送")
         return 0
 
@@ -65,14 +66,19 @@ async def send_linuxdo_push(application: Application, period: Optional[str] = No
     text = format_topics_message(
         topics, period, summaries=summaries, show_excerpt=config.get("show_excerpt", True),
     )
-    try:
-        for chunk in split_text(text):
-            await send_markdown(application.bot, chat_id, chunk, disable_web_page_preview=True)
-    except Exception as exc:
-        logger.error(f"向 {chat_id} 推送 linux.do 热门帖失败: {exc}")
-        return 0
-    logger.info(f"已向 {chat_id} 推送 {len(topics)} 条 linux.do {period} 热门帖")
-    return len(topics)
+    chunks = split_text(text)
+    delivered = 0
+    for chat_id in chat_ids:
+        # 单个频道失败不影响其余频道。
+        try:
+            for chunk in chunks:
+                await send_markdown(application.bot, chat_id, chunk, disable_web_page_preview=True)
+        except Exception as exc:
+            logger.error(f"向 {chat_id} 推送 linux.do 热门帖失败: {exc}")
+            continue
+        delivered += 1
+        logger.info(f"已向 {chat_id} 推送 {len(topics)} 条 linux.do {period} 热门帖")
+    return len(topics) if delivered else 0
 
 
 async def setup_linuxdo_push_scheduler(application, scheduler: AsyncIOScheduler):

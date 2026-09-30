@@ -165,6 +165,16 @@ class PushHandlerTests(unittest.IsolatedAsyncioTestCase):
         assert_valid_markdown_v2(self, kwargs["text"])
         ai.summarize_hotspot_news.assert_not_called()
 
+    async def test_push_to_multiple_chats_continues_after_failure(self):
+        app = Mock()
+        app.bot.send_message = AsyncMock(side_effect=[RuntimeError("kicked"), None])
+        fetch = AsyncMock(return_value=linuxdo.parse_feed(FEED))
+        with patch.object(self.module, "config_manager", settings_with({"telegram_push_chat_id": " -100, @chan ,-100,"})),                 patch.object(self.module, "fetch_top_topics", fetch):
+            count = await self.module.send_linuxdo_push(app)
+        self.assertEqual(count, 2)
+        sent_to = [call.kwargs["chat_id"] for call in app.bot.send_message.await_args_list]
+        self.assertEqual(sent_to, ["-100", "@chan"])
+
     async def test_ai_summary_failure_falls_back(self):
         summarize = AsyncMock(side_effect=[RuntimeError("down"), "摘要二"])
         count, app, _, _ = await self.push({"telegram_push_chat_id": "-100", "ai_summary": True}, summarize=summarize)
@@ -196,6 +206,17 @@ class PushHandlerTests(unittest.IsolatedAsyncioTestCase):
             await self.module.setup_linuxdo_push_scheduler("app", scheduler)
         scheduler.remove_job.assert_called_once_with("linuxdo_push_job")
         scheduler.add_job.assert_not_called()
+
+
+class ParseChatIdsTests(unittest.TestCase):
+    def test_splits_trims_and_dedupes(self):
+        from bot.utils.helpers import parse_chat_ids
+        self.assertEqual(parse_chat_ids(" @a, -100 ,,@a,"), ["@a", "-100"])
+        self.assertEqual(parse_chat_ids("-4656523535"), ["-4656523535"])
+        self.assertEqual(parse_chat_ids(["@a", " @b "]), ["@a", "@b"])
+        self.assertEqual(parse_chat_ids(-100), ["-100"])
+        self.assertEqual(parse_chat_ids(""), [])
+        self.assertEqual(parse_chat_ids(None), [])
 
 
 class ConfigValidationTests(unittest.TestCase):

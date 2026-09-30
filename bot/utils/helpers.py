@@ -330,3 +330,16 @@ async def safe_bot_send_message(
     return await bot.send_message(
         chat_id=chat_id, text=cleaned_text, parse_mode=parse_mode, **kwargs
     )
+
+
+def parse_chat_ids(value: Union[str, int, List, None]) -> List[str]:
+    """把英文逗号分隔的频道/群组 ID 拆成去重后的列表，保持原有顺序。"""
+    if value is None:
+        return []
+    items = value if isinstance(value, (list, tuple)) else str(value).split(",")
+    ids: List[str] = []
+    for item in items:
+        chat_id = str(item).strip()
+        if chat_id and chat_id not in ids:
+            ids.append(chat_id)
+    return ids

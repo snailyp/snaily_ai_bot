@@ -13,6 +13,7 @@ from loguru import logger
 from telegram.ext import Application
 
 from bot.services.ai_services import ai_services
+from bot.utils.helpers import parse_chat_ids
 from config.settings import config_manager
 
 
@@ -89,11 +90,11 @@ async def send_hotspot_push(application: Application):
     发送热点新闻推送
     """
     hotspot_config = config_manager.get("features.hotspot_push", {})
-    chat_id = hotspot_config.get("telegram_push_chat_id")
+    chat_ids = parse_chat_ids(hotspot_config.get("telegram_push_chat_id"))
     sources = hotspot_config.get("sources", [])
     keywords = hotspot_config.get("keywords", [])
 
-    if not chat_id:
+    if not chat_ids:
         logger.warning("未配置 Telegram 推送频道 ID (TELEGRAM_PUSH_CHAT_ID)，跳过推送")
         return
 
@@ -159,12 +160,20 @@ async def send_hotspot_push(application: Application):
                         message_for_source
                     )
 
-                # 发送单个源的消息
-                await application.bot.send_message(
-                    chat_id=chat_id, text=message_for_source
-                )
-                logger.info(f"成功向频道 {chat_id} 推送来自 {source_id} 的热点新闻")
-                total_pushed_sources += 1
+                # 发送单个源的消息；单个频道失败不影响其余频道
+                sent = False
+                for chat_id in chat_ids:
+                    try:
+                        await application.bot.send_message(
+                            chat_id=chat_id, text=message_for_source
+                        )
+                    except Exception as e:
+                        logger.error(f"向频道 {chat_id} 推送来自 {source_id} 的热点新闻失败: {e}")
+                        continue
+                    sent = True
+                    logger.info(f"成功向频道 {chat_id} 推送来自 {source_id} 的热点新闻")
+                if sent:
+                    total_pushed_sources += 1
                 await asyncio.sleep(2)  # 在两次推送之间增加延迟
 
         if total_pushed_sources == 0:
@@ -173,7 +182,7 @@ async def send_hotspot_push(application: Application):
             logger.info(f"共推送了 {total_pushed_sources} 个来源的热点新闻")
 
     except Exception as e:
-        logger.error(f"向频道 {chat_id} 推送热点新闻失败: {e}")
+        logger.error(f"推送热点新闻失败: {e}")
 
 
 async def setup_hotspot_push_scheduler(application, scheduler: AsyncIOScheduler):
