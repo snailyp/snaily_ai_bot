@@ -57,6 +57,38 @@ class AIAPITests(unittest.TestCase):
     def post(self, path, payload, **kwargs):
         return self.client.post(path, json=payload, headers={"X-CSRF-Token": "test-csrf", **kwargs})
 
+    def test_media_roundtrip_discovery_and_no_implicit_generation(self):
+        sections = {}
+        for kind in ('asr', 'tts', 'vision'):
+            sections[kind] = {
+                'enabled': True,
+                'providers': [{'id': 'media-provider', 'api_key': kind + '-secret', 'api_base_url': 'https://example.invalid/v1', 'headers': {'X-Private': kind + '-header'}}],
+                'models': [{'id': 'media-model', 'provider_id': 'media-provider', 'model': kind + '-model'}],
+                'active_model_id': 'media-model',
+            }
+        with patch.object(ai_api.TextGenerator, 'complete', new_callable=AsyncMock) as generate:
+            response = self.post('/api/ai_config', {'ai_services': sections})
+            self.assertEqual(response.status_code, 200, response.json)
+            generate.assert_not_awaited()
+        public = response.json['ai_services']
+        body = response.get_data(as_text=True) + self.client.get('/api/config').get_data(as_text=True)
+        for kind in sections:
+            self.assertNotIn(kind + '-secret', body)
+            self.assertNotIn(kind + '-header', body)
+            context = MagicMock()
+            context.__enter__.return_value.models.list.return_value = types.SimpleNamespace(data=[])
+            with patch.object(ai_api.openai, 'OpenAI', return_value=context) as factory:
+                found = self.post('/api/ai/models', {'kind': kind, 'provider': public[kind]['providers'][0]})
+                self.assertEqual(found.status_code, 200, found.json)
+                self.assertEqual(factory.call_args.kwargs['api_key'], kind + '-secret')
+            context.__exit__.assert_called_once()
+            # Existing text-only test endpoint must not silently run a media test.
+            self.assertEqual(self.post('/api/ai/test', {'kind': kind}).status_code, 400)
+        again = self.post('/api/ai_config', {'ai_services': public})
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(self.manager.get_ai_config()['tts']['providers'][0]['api_key'], 'tts-secret')
+        self.assertFalse(again.json['persisted'])
+
     def test_get_config_masks_all_ai_secrets(self):
         response = self.client.get("/api/config")
         self.assertEqual(response.status_code, 200)

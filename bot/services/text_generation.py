@@ -188,6 +188,15 @@ class TextGenerator:
         used_calls = 0
         state = [dict(message) for message in messages]
         is_responses = model["api_type"] == "responses"
+        if is_responses:
+            for message in state:
+                if isinstance(message.get("content"), list):
+                    message["content"] = [
+                        {"type": "input_image", "image_url": part["image_url"]["url"]}
+                        if part.get("type") == "image_url" else
+                        {"type": "input_text", "text": part["text"]}
+                        for part in message["content"]
+                    ]
         parameters = request_parameters(model)
 
         try:

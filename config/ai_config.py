@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 __all__ = [
     "normalize_ai_config", "validate_ai_config", "redact_ai_config",
     "merge_ai_secrets", "resolve_text_model", "resolve_image_model",
-    "validate_headers",
+    "validate_headers", "resolve_media_model",
 ]
 
 _TEXT_PARAMETERS = {
@@ -144,6 +144,7 @@ def _env_map(value):
 def _defaults():
     return {
         "schema_version": 2,
+        **{name: {"enabled": False, "providers": [], "models": [], "active_model_id": ""} for name in ("asr", "tts", "vision")},
         "text": {"providers": [], "models": [], "chat_model_id": "", "task_model_id": ""},
         "drawing": {"providers": [], "models": [], "active_model_id": ""},
         "mcp": {
@@ -242,7 +243,7 @@ def normalize_ai_config(raw):
     if version != 2:
         _migrate_legacy(value)
     _fill_defaults(value, _defaults())
-    for section_name in ("text", "drawing"):
+    for section_name in ("text", "drawing", "asr", "tts", "vision"):
         section = value.get(section_name)
         if not isinstance(section, dict):
             continue
@@ -257,8 +258,10 @@ def normalize_ai_config(raw):
         if isinstance(models, list):
             for model in models:
                 defaults = {"name": "", "provider_id": "", "model": "", "parameters": {}}
-                if section_name == "text":
+                if section_name in ("text", "vision"):
                     defaults.update(api_type="chat_completions", token_limit_field="max_completion_tokens", supports_tools=False)
+                if section_name == "tts":
+                    defaults["voice"] = "alloy"
                 _fill_defaults(model, defaults)
     mcp = value.get("mcp")
     if isinstance(mcp, dict) and isinstance(mcp.get("servers"), list):
@@ -391,9 +394,11 @@ def validate_ai_config(config):
     value = normalize_ai_config(config)
     if any(k in value for k in ("openai", "openai_configs", "active_openai_config_index")):
         _fail("ai_services", "legacy fields cannot be updated after migration")
-    for section_name in ("text", "drawing"):
+    for section_name in ("text", "drawing", "asr", "tts", "vision"):
         section = _object(value[section_name], section_name)
         _only_fields(section, _defaults()[section_name], section_name)
+        if section_name in ("asr", "tts", "vision"):
+            _boolean(section["enabled"], section_name + ".enabled")
         providers = _rows(section["providers"], section_name + ".providers")
         models = _rows(section["models"], section_name + ".models")
         for provider in providers.values():
@@ -412,18 +417,24 @@ def validate_ai_config(config):
         for model in models.values():
             path = section_name + ".models"
             allowed = {"id", "name", "provider_id", "model", "parameters"}
-            if section_name == "text":
+            if section_name in ("text", "vision"):
                 allowed.update({"api_type", "token_limit_field", "supports_tools"})
+            if section_name == "tts":
+                allowed.add("voice")
+                _string(model["voice"], path + ".voice", required=True)
             _only_fields(model, allowed, path)
             for name in ("name", "provider_id", "model"):
                 _string(model[name], path + "." + name)
-            if section_name == "text":
+            if section_name in ("text", "vision"):
                 _enum(model["api_type"], {"chat_completions", "responses"}, path + ".api_type")
                 _enum(model["token_limit_field"], {"max_completion_tokens", "max_tokens"}, path + ".token_limit_field")
                 _boolean(model["supports_tools"], path + ".supports_tools")
                 _text_parameters(model["parameters"], path + ".parameters")
                 if model["api_type"] == "responses" and {"presence_penalty", "frequency_penalty"} & model["parameters"].keys():
                     _fail(path + ".parameters", "penalty parameters are not supported by Responses")
+            elif section_name in ("asr", "tts"):
+                _object(model["parameters"], path + ".parameters")
+                _only_fields(model["parameters"], set(), path + ".parameters")
             else:
                 provider_type = providers.get(model["provider_id"], {}).get("type")
                 _image_parameters(model["parameters"], provider_type, path + ".parameters")
@@ -432,6 +443,8 @@ def validate_ai_config(config):
             _string(section[selection], section_name + "." + selection)
             if section[selection]:
                 _resolve(section, selection, section_name + "." + selection)
+        if section_name in ("asr", "tts", "vision") and section["enabled"]:
+            _resolve(section, "active_model_id", section_name + ".active_model_id")
     mcp = _object(value["mcp"], "mcp")
     _only_fields(mcp, _defaults()["mcp"], "mcp")
     for name in ("enabled", "admin_only"):
@@ -462,7 +475,7 @@ def validate_ai_config(config):
 
 
 def _secret_rows(config):
-    for section in ("text", "drawing"):
+    for section in ("text", "drawing", "asr", "tts", "vision"):
         for row in config[section]["providers"]:
             yield row, True
     for row in config["mcp"]["servers"]:
@@ -526,6 +539,7 @@ def merge_ai_secrets(current, incoming):
     for section_name, collection, provider in (
         ("text", "providers", True), ("drawing", "providers", True), ("mcp", "servers", False),
         ("search", "providers", True),
+        ("asr", "providers", True), ("tts", "providers", True), ("vision", "providers", True),
     ):
         section = update.get(section_name)
         if not isinstance(section, dict) or collection not in section:
@@ -563,3 +577,12 @@ def resolve_image_model(ai_config):
     """Resolve the independently configured active image model."""
     value = validate_ai_config(ai_config)
     return _resolve(value["drawing"], "active_model_id", "drawing.active_model_id")
+
+
+def resolve_media_model(ai_config, capability):
+    if capability not in {"asr", "tts", "vision"}:
+        _fail("media", "unsupported capability")
+    value = validate_ai_config(ai_config)
+    if not value[capability]["enabled"]:
+        _fail(capability, "capability is disabled")
+    return _resolve(value[capability], "active_model_id", capability + ".active_model_id")

@@ -28,6 +28,7 @@ LABEL org.opencontainers.image.title="小蜗AI助手" \
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
     gcc \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # 先复制 requirements.txt 并安装依赖（利用 Docker 层缓存）

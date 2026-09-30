@@ -3,6 +3,14 @@
 用于存储群聊消息，支持总结功能
 """
 
+import asyncio
+import base64
+import re
+import time
+import uuid
+from copy import deepcopy
+from pathlib import Path
+
 import json
 import os
 from collections import defaultdict
@@ -21,6 +29,19 @@ class MessageStore:
         self.messages = defaultdict(list)  # chat_id -> messages
         self._ensure_storage_dir()
         self._load_messages()
+        self._versions = defaultdict(int)
+        self._locks = {}
+        self._pending_media = {}
+        self.media_dir = Path(self.storage_dir) / "media"
+        self.media_dir.mkdir(exist_ok=True)
+        self.settings_file = Path(self.storage_dir) / "chat_settings.json"
+        try:
+            self.chat_settings = json.loads(self.settings_file.read_text(encoding="utf-8"))
+            if not isinstance(self.chat_settings, dict):
+                self.chat_settings = {}
+        except (OSError, ValueError):
+            self.chat_settings = {}
+        self.cleanup_media()
 
     def _ensure_storage_dir(self):
         """确保存储目录存在"""
@@ -233,7 +254,7 @@ class MessageStore:
                 or "role" not in message
                 or "content" not in message
             ):
-                logger.error(f"无效的消息格式: {message}")
+                logger.error("无效的消息格式")
                 return
 
             # 添加时间戳
@@ -261,11 +282,15 @@ class MessageStore:
 
             # 限制对话历史最多保存100条消息
             if len(dialog_history) > 100:
+                removed = dialog_history[:-100]
                 dialog_history = dialog_history[-100:]
+                self._remove_media(removed)
 
             # 保存到文件
-            with open(dialog_file, "w", encoding="utf-8") as f:
+            temporary = dialog_file + ".tmp"
+            with open(temporary, "w", encoding="utf-8") as f:
                 json.dump(dialog_history, f, ensure_ascii=False, indent=2)
+            os.replace(temporary, dialog_file)
 
             logger.debug(f"添加对话消息 - 聊天: {chat_id}, 角色: {message.get('role')}")
 
@@ -306,6 +331,8 @@ class MessageStore:
             for msg in dialog_history:
                 if isinstance(msg, dict) and "role" in msg and "content" in msg:
                     cleaned_msg = {"role": msg["role"], "content": msg["content"]}
+                    if isinstance(msg.get("media"), list):
+                        cleaned_msg["media"] = deepcopy(msg["media"])
                     cleaned_history.append(cleaned_msg)
 
             logger.debug(
@@ -326,6 +353,9 @@ class MessageStore:
         Args:
             chat_id: 聊天ID
         """
+        self._versions[chat_id] += 1
+        self.release_media([{"id": identifier} for identifier, owner in self._pending_media.items() if owner == chat_id])
+        self._remove_media(self.get_dialog_history(chat_id, limit=0))
         try:
             dialog_file = self._get_dialog_history_file(chat_id)
 
@@ -339,6 +369,92 @@ class MessageStore:
         except Exception as e:
             logger.error(f"清除对话历史时出错 - 聊天: {chat_id}, 错误: {e}")
             raise
+
+    def chat_lock(self, chat_id):
+        return self._locks.setdefault(chat_id, asyncio.Lock())
+
+    def version(self, chat_id):
+        return self._versions[chat_id]
+
+    def chat_setting(self, chat_id, key, default=False):
+        return self.chat_settings.get(str(chat_id), {}).get(key, default)
+
+    def set_chat_setting(self, chat_id, key, value):
+        self.chat_settings.setdefault(str(chat_id), {})[key] = value
+        temporary = self.settings_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps(self.chat_settings, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, self.settings_file)
+
+    def _media_path(self, reference):
+        identifier = reference.get("id", "") if isinstance(reference, dict) else ""
+        if not isinstance(identifier, str) or not re.fullmatch(r"[a-f0-9]{32}", identifier):
+            return None
+        return self.media_dir / identifier
+
+    def save_photo(self, data, chat_id=None):
+        from bot.services.speech import MAX_BYTES, MediaError
+        if not data or len(data) > MAX_BYTES:
+            raise MediaError("图片为空或超过 20 MB。")
+        if data.startswith(bytes.fromhex("ffd8ff")):
+            mime = "image/jpeg"
+        elif data.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            mime = "image/png"
+        else:
+            raise MediaError("图片格式无效，请作为 Telegram 照片发送。")
+        reference = {"id": uuid.uuid4().hex, "mime": mime}
+        self._media_path(reference).write_bytes(data)
+        self._pending_media[reference["id"]] = chat_id
+        return reference
+
+    def release_media(self, references, keep=False):
+        for reference in references:
+            self._pending_media.pop(reference.get("id"), None)
+            if not keep:
+                path = self._media_path(reference)
+                if path:
+                    path.unlink(missing_ok=True)
+
+    def discard_pending_media(self, references):
+        self.release_media([reference for reference in references if reference.get("id") in self._pending_media])
+
+    def _remove_media(self, messages):
+        for message in messages:
+            self.release_media(message.get("media", []))
+
+    def model_history(self, history):
+        """Materialize valid images only at the provider boundary; disk history stays text."""
+        result, has_images = [], False
+        for message in history:
+            content = str(message.get("content", ""))
+            parts = [{"type": "text", "text": content}]
+            for reference in message.get("media", []):
+                path = self._media_path(reference)
+                if path and path.is_file() and time.time() - path.stat().st_mtime < 86400:
+                    from bot.services.speech import MAX_BYTES
+                    if path.stat().st_size <= MAX_BYTES:
+                        mime = reference.get("mime")
+                        if mime in ("image/jpeg", "image/png"):
+                            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+                            parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}})
+                            has_images = True
+                            continue
+                parts[0]["text"] += "\n[图片已过期或已清理，无法再次查看]"
+            result.append({"role": message["role"], "content": parts if len(parts) > 1 else parts[0]["text"]})
+        return result, has_images
+
+    def cleanup_media(self):
+        referenced = set(self._pending_media)
+        for file in Path(self.storage_dir).glob("dialog_history_*.json"):
+            try:
+                for message in json.loads(file.read_text(encoding="utf-8")):
+                    for reference in message.get("media", []):
+                        if isinstance(reference, dict):
+                            referenced.add(reference.get("id"))
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+        for path in self.media_dir.iterdir():
+            if path.is_file() and (path.name not in referenced or time.time() - path.stat().st_mtime >= 86400):
+                path.unlink(missing_ok=True)
 
     def cleanup_expired_files(self, retention_days: int = 30):
         """清理过期的对话历史和群消息文件

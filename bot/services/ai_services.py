@@ -11,9 +11,10 @@ from loguru import logger
 from md2tgmd import escape
 
 from config.chat_prompts import resolve_chat_prompt
-from config.ai_config import resolve_image_model, resolve_text_model
+from config.ai_config import resolve_image_model, resolve_text_model, resolve_media_model
 from config.settings import config_manager
 from bot.services import web_search
+from bot.services.speech import SpeechService
 from bot.services.image_generation import ImageGenerator, ImageResult
 from bot.services.mcp_client import MCPClientManager
 from bot.services.text_generation import TextGenerationError, TextGenerator, client_options
@@ -26,6 +27,7 @@ class AIServices:
         self.config_manager = manager or config_manager
         self.text_generator = text_generator or TextGenerator()
         self.image_generator = image_generator or ImageGenerator()
+        self.speech = SpeechService()
         self.mcp = mcp or MCPClientManager(
             lambda: self.config_manager.get_ai_config().get("mcp", {}),
             self.config_manager.is_admin,
@@ -60,15 +62,17 @@ class AIServices:
         role: str = "chat",
         chat_id: Optional[int] = None,
         system_prompt: Optional[str] = None,
+        strict: bool = False,
+        vision: bool = False,
     ) -> Optional[str]:
         try:
             ai_config = self.config_manager.get_ai_config()
-            provider, model = resolve_text_model(ai_config, role)
+            provider, model = resolve_media_model(ai_config, "vision") if vision else resolve_text_model(ai_config, role)
             if system_prompt is None:
                 system_prompt = resolve_chat_prompt(self.config_manager.get("features.chat", {})) if role == "chat" else "请根据用户提供的资料和任务要求，用中文准确、简洁地回答。"
             messages = [{"role": "system", "content": system_prompt}] + history
             tools = []
-            if role == "chat" and model.get("supports_tools") and user_id is not None:
+            if not vision and role == "chat" and model.get("supports_tools") and user_id is not None:
                 tools = await self.mcp.list_tools(user_id, chat_id)
 
             async def call_tool(name, arguments):
@@ -81,6 +85,8 @@ class AIServices:
             logger.info(f"AI 生成完成 - 用途: {role}, 用户: {user_id}, 回复长度: {len(reply)}")
             return escape(reply) if enable_md2tg else reply
         except Exception as exc:
+            if strict:
+                raise TextGenerationError("AI 服务暂时不可用，请检查模型配置或稍后重试。") from None
             detail = f", 原因: {exc}" if isinstance(exc, TextGenerationError) else ""
             logger.warning(f"AI 生成失败 - 用途: {role}, 错误类型: {type(exc).__name__}{detail}")
             # 后台摘要不能把错误提示当成成功摘要推送出去。
@@ -88,6 +94,14 @@ class AIServices:
                 return None
             message = "抱歉，AI 服务暂时不可用，请检查模型配置或稍后重试。"
             return escape(message) if enable_md2tg else message
+
+    async def transcribe(self, data):
+        provider, model = resolve_media_model(self.config_manager.get_ai_config(), "asr")
+        return await self.speech.transcribe(provider, model, data)
+
+    async def synthesize(self, text):
+        provider, model = resolve_media_model(self.config_manager.get_ai_config(), "tts")
+        return await self.speech.synthesize(provider, model, text)
 
     async def generate_image(self, prompt: str, user_id: Optional[int] = None) -> Optional[ImageResult]:
         try:

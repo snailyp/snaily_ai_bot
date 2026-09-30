@@ -32,6 +32,8 @@ from telegram.ext import (
 )
 
 from bot.handlers.ask_gb import ask_gb_command
+from bot.handlers.media import media_handler, voice_command
+from bot.services.message_store import message_store
 from bot.handlers.chat import (
     chat_command,
     handle_message,
@@ -144,12 +146,15 @@ class TelegramBot:
             raise RuntimeError("应用程序未初始化，无法注册处理器")
 
         app = self.application
+        media_handler.accepting = True
 
         # 基础命令
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_command))
         app.add_handler(CommandHandler("status", status))
         app.add_handler(CommandHandler("reset", reset_command))
+        app.add_handler(CommandHandler("voice", voice_command))
+        app.add_handler(MessageHandler(filters.PHOTO | filters.VOICE | filters.AUDIO, media_handler.handle))
 
         # 管理员模型管理命令
         app.add_handler(CommandHandler("models", list_models_command))
@@ -199,6 +204,8 @@ class TelegramBot:
         from bot.services.message_store import message_store
 
         await setup_cleanup_scheduler(self.scheduler, message_store)
+        message_store.cleanup_media()
+        self.scheduler.add_job(media_handler.cleanup, "interval", minutes=10, id="media_cleanup", replace_existing=True)
 
         # 热点新闻推送定时任务
         await setup_hotspot_push_scheduler(self.application, self.scheduler)
@@ -240,6 +247,7 @@ class TelegramBot:
                 BotCommand("draw", "生成一张图片 (格式: /draw <描述>)"),
                 BotCommand("summary", "总结群聊消息"),
                 BotCommand("reset", "重置当前对话历史"),
+                BotCommand("voice", "语音回复 on/off/status"),
                 BotCommand("status", "查看机器人当前状态"),
             ]
 
@@ -315,6 +323,9 @@ class TelegramBot:
             if self.scheduler and self.scheduler.running:
                 logger.debug("停止调度器...")
                 self.scheduler.shutdown(wait=False)
+
+            from bot.handlers.media import media_handler
+            await media_handler.aclose()
 
             # 停止 Telegram 应用
             if self.application is not None:

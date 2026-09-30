@@ -161,6 +161,41 @@ class FrontendSmoke(unittest.TestCase):
         self.page.locator(f'#{form} button[type="submit"]').click()
         expect(self.page.locator(f'#{form} .save-state')).to_have_text('✓ 设置已保存')
 
+    def test_media_panels_save_secrets_and_independent_models(self):
+        self.open('ai-config')
+        original_chat = self.config['ai_services']['text']['chat_model_id']
+        for kind in ['asr', 'tts', 'vision']:
+            self.page.locator(f'#ai-tab-{kind}').click()
+            expect(self.page.locator(f'#{kind}-enabled')).not_to_be_checked()
+            self.page.locator(f'#add-{kind}-provider').click()
+            self.page.locator(f'#{kind}-provider-key').fill(f'{kind}-private-secret')
+            self.page.locator(f'#add-{kind}-model').click()
+            self.page.locator(f'#{kind}-model-model').fill(f'{kind}-custom-model')
+            model_id = self.page.locator(f'#{kind}-model-list button').get_attribute('data-profile-id')
+            self.page.locator(f'#ai-{kind}-model').select_option(model_id)
+            self.page.locator(f'#{kind}-enabled').check()
+            if kind == 'tts':
+                self.page.locator('#tts-model-voice').fill('custom-voice')
+            if kind == 'vision':
+                self.page.locator('#vision-model-api-type').select_option('responses')
+            self.assertEqual(self.posts, [], 'Editing must not call any endpoint')
+        self.save('ai-config-form')
+        self.assertEqual(self.config['ai_services']['text']['chat_model_id'], original_chat)
+        for kind in ['asr', 'tts', 'vision']:
+            self.page.locator(f'#ai-tab-{kind}').click()
+            expect(self.page.locator(f'#{kind}-provider-key')).to_have_value('')
+            self.assertEqual(self.config['ai_services'][kind]['providers'][0]['api_key'], f'{kind}-private-secret')
+            self.page.locator(f'#{kind}-discover-models').click()
+        self.save('ai-config-form')
+        self.assertEqual(self.config['ai_services']['tts']['models'][0]['voice'], 'custom-voice')
+        self.assertEqual(self.config['ai_services']['vision']['models'][0]['api_type'], 'responses')
+        self.assertFalse(any(path in ['/api/ai/test', '/api/media/test'] for path, _ in self.posts))
+        self.page.set_viewport_size({'width': 375, 'height': 950})
+        for kind in ['asr', 'tts', 'vision']:
+            self.page.locator(f'#ai-tab-{kind}').click()
+            self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+            self.page.screenshot(path=str(self.artifacts / f'media-{kind}-mobile.png'), full_page=True)
+
     def test_prompt_library_crud_and_persistence(self):
         self.open('ai-config')
         self.page.locator('#ai-tab-prompts').click()

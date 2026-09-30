@@ -52,8 +52,8 @@ def _error(exc, operation):
 def _draft(data, with_model=False):
     """按稳定 ID 合并已保存的秘密，但不修改运行配置。"""
     kind = data.get("kind", "text")
-    if kind not in {"text", "drawing"}:
-        raise AIRequestError("kind 必须是 text 或 drawing。")
+    if kind not in {"text", "drawing", "asr", "tts", "vision"}:
+        raise AIRequestError("kind 必须是 text、drawing、asr、tts 或 vision。")
     provider = data.get("provider")
     if not isinstance(provider, dict) or not provider.get("id"):
         raise AIRequestError("请提供带有稳定 ID 的提供商配置。")
@@ -121,7 +121,7 @@ def get_models():
                 response = client.models.list()
                 model_ids = [item.id for item in response.data]
         return jsonify(success=True, models=[{"id": value, "name": value} for value in sorted(set(model_ids))],
-                       message="模型列表已获取；也可以手动填写模型 ID。")
+                       message="模型列表已获取；也可以手动填写模型 ID。列表不代表媒体能力可用。")
     except Exception as exc:
         return _error(exc, "获取模型列表")
 

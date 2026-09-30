@@ -226,6 +226,21 @@ class ConfigManager:
                 },
                 "search": search,
             }
+        for capability in ("asr", "tts", "vision"):
+            prefix = capability.upper()
+            if capability not in value and os.getenv(prefix + "_MODEL", "").strip():
+                model = {"id": "env-model", "provider_id": "env-provider", "model": os.environ[prefix + "_MODEL"]}
+                if capability == "tts":
+                    model["voice"] = os.getenv("TTS_VOICE", "alloy")
+                if capability == "vision":
+                    model["api_type"] = os.getenv("VISION_API_TYPE", "chat_completions")
+                value[capability] = {
+                    "enabled": self._env_bool(prefix + "_ENABLED", False),
+                    "active_model_id": "env-model", "models": [model],
+                    "providers": [{"id": "env-provider", "api_key": os.getenv(prefix + "_API_KEY", ""),
+                                   "api_base_url": os.getenv(prefix + "_API_BASE_URL", "https://api.openai.com/v1"),
+                                   "timeout": self._env_int(prefix + "_TIMEOUT", 60)}],
+                }
         return validate_ai_config(self._apply_search_env(normalize_ai_config(value)))
 
     def load_config(self) -> None:

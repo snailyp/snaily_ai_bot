@@ -2,6 +2,9 @@
 AI 对话和搜索功能处理器
 """
 
+import asyncio
+from contextlib import suppress
+
 from loguru import logger
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -23,77 +26,57 @@ async def _send_long_message(update: Update, message: str) -> None:
     await reply_markdown_long(update.effective_message, message)
 
 
-async def _chat_with_ai(update: Update, text: str) -> None:
-    """内部辅助函数：处理与AI的对话逻辑"""
-    if not (
-        update.effective_message and update.effective_user and update.effective_chat
-    ):
-        logger.warning("_chat_with_ai received an update without required components.")
+async def _chat_with_ai(update: Update, text: str, *, media=None, version=None) -> None:
+    """One serialized conversation path for text, transcription and photos."""
+    if not (update.effective_message and update.effective_user and update.effective_chat):
         return
+    chat_id = update.effective_chat.id
+    version = message_store.version(chat_id) if version is None else version
+    async with message_store.chat_lock(chat_id):
+        await _chat_turn(update, text, media=media, version=version)
 
+
+async def _chat_turn(update, text, *, media=None, version):
+    """Caller owns the chat lock, including media preprocessing when applicable."""
+    chat_id = update.effective_chat.id
+    if version != message_store.version(chat_id):
+        return
+    thinking = await update.effective_message.reply_text("AI 正在思考中...")
+    history_enabled = config_manager.get("features.chat.history_enabled", True)
+    user_message = {"role": "user", "content": text}
+    if media:
+        user_message["media"] = media
     try:
-        user = update.effective_user
-        chat = update.effective_chat
-
-        # 发送"正在思考"消息
-        thinking_message = await update.effective_message.reply_text(
-            "🤔 AI 正在思考中..."
-        )
-
-        # 检查历史功能是否启用
-        history_enabled = config_manager.get("features.chat.history_enabled", True)
-
+        history = message_store.get_dialog_history(
+            chat_id, limit=config_manager.get("features.chat.history_max_length", 10)
+        ) if history_enabled else []
+        payload, vision = message_store.model_history(history + [user_message])
+        response = await asyncio.wait_for(ai_services.chat_completion(
+            history=payload, user_id=update.effective_user.id, chat_id=chat_id,
+            strict=True, vision=vision,
+        ), timeout=300)
+        if version != message_store.version(chat_id):
+            await thinking.delete()
+            return
+        if not response:
+            raise ValueError("empty response")
         if history_enabled:
-            # 获取历史记录最大长度配置
-            history_max_length = config_manager.get(
-                "features.chat.history_max_length", 10
-            )
-
-            # 获取历史对话记录
-            history = message_store.get_dialog_history(
-                chat.id, limit=history_max_length
-            )
-
-            # 构建当前用户消息
-            user_message = {"role": "user", "content": text}
-
-            # 保存用户消息到历史记录
-            message_store.add_dialog_message(chat.id, user_message)
-
-            # 更新历史记录，包含当前用户消息
-            updated_history = history + [user_message]
-        else:
-            # 如果历史功能禁用，只使用当前消息
-            user_message = {"role": "user", "content": text}
-            updated_history = [user_message]
-
-        # 调用 AI 服务
-        ai_response = await ai_services.chat_completion(
-            history=updated_history, user_id=user.id, chat_id=chat.id
-        )
-
-        if ai_response:
-            # 构建AI回复消息
-            assistant_message = {"role": "assistant", "content": ai_response}
-
-            # 只有在历史功能启用时才保存AI回复到历史记录
-            if history_enabled:
-                message_store.add_dialog_message(chat.id, assistant_message)
-
-            # 删除"正在思考"消息并发送回复
-            await thinking_message.delete()
-
-            # 使用统一的长消息发送函数
-            await _send_long_message(update, ai_response)
-        else:
-            await thinking_message.edit_text("抱歉，AI 服务暂时不可用，请稍后再试。")
-
-        logger.info(f"用户 {user.id} ({user.username}) 完成AI对话")
-
-    except Exception as e:
-        logger.error(f"处理AI对话时出错: {e}")
-        if update.effective_message:
-            await update.effective_message.reply_text("抱歉，处理对话时出现错误。")
+            message_store.add_dialog_message(chat_id, user_message)
+            message_store.add_dialog_message(chat_id, {"role": "assistant", "content": response})
+            message_store.release_media(media or [], keep=True)
+        with suppress(Exception):
+            await thinking.delete()
+        if version != message_store.version(chat_id):
+            return
+        await _send_long_message(update, response)
+        if message_store.chat_setting(chat_id, "voice"):
+            from bot.handlers.media import send_voice_reply
+            await send_voice_reply(update, response, version)
+    except Exception:
+        await thinking.edit_text("抱歉，AI 服务暂时不可用，请检查模型配置或稍后重试。")
+    finally:
+        if not history_enabled or version != message_store.version(chat_id):
+            message_store.release_media(media or [])
 
 
 async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

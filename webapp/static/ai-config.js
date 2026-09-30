@@ -85,6 +85,7 @@
                 mcp: { enabled: false, admin_only: true, allowed_user_ids: [], allowed_chat_ids: [], max_rounds: 4, max_calls: 8, timeout: 30, max_result_chars: 12000, servers: [], ...ai.mcp },
                 search: { enabled: true, max_results: 5, summarize: true, fallback: true, active_provider_id: '', providers: [], ...ai.search }
             };
+            for (const kind of ['asr', 'tts', 'vision']) this.draft[kind] = { enabled: false, providers: [], models: [], active_model_id: '', ...ai[kind] };
             this.raw = new WeakMap();
             this.secretRows = new WeakMap();
             this.suggestions.clear();
@@ -92,7 +93,7 @@
             this.chat.system_prompts ||= [{ id: 'default', name: '默认提示词', content: this.chat.system_prompt ?? '你是一个友善、有帮助的AI助手。请用简洁明了的中文回答用户的问题。' }];
             this.chat.active_system_prompt_id ||= this.chat.system_prompts[0].id;
             if (!this.chat.system_prompts.some(item => item.id === this.selectedPrompt)) this.selectedPrompt = this.chat.system_prompts[0].id;
-            for (const kind of ['text', 'drawing']) {
+            for (const kind of ['text', 'drawing', 'asr', 'tts', 'vision']) {
                 this.draft[kind].models.forEach(model => { model.parameters ||= {}; });
                 for (const collection of ['provider', 'model']) this.ensureSelection(kind, collection);
             }
@@ -114,7 +115,7 @@
             if (!this.current(kind, collection)) this.selected[`${kind}-${collection}`] = this.items(kind, collection)[0]?.id || '';
         }
         newId() {
-            const ids = new Set([...this.chat.system_prompts, ...this.draft.mcp.servers, ...this.draft.search.providers, ...['text', 'drawing'].flatMap(kind => [...this.draft[kind].providers, ...this.draft[kind].models])].map(item => item.id));
+            const ids = new Set([...this.chat.system_prompts, ...this.draft.mcp.servers, ...this.draft.search.providers, ...['text', 'drawing', 'asr', 'tts', 'vision'].flatMap(kind => [...this.draft[kind].providers, ...this.draft[kind].models])].map(item => item.id));
             let id;
             do {
                 id = globalThis.crypto?.randomUUID?.() || `ai-${Date.now().toString(36)}-${(++this.sequence).toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -176,7 +177,7 @@
                     this.renderList(kind, 'model');
                 });
             }
-            for (const kind of ['text', 'drawing']) {
+            for (const kind of ['text', 'drawing', 'asr', 'tts', 'vision']) {
                 for (const collection of ['provider', 'model']) {
                     $(`add-${kind}-${collection}`).addEventListener('click', () => this.add(kind, collection));
                     $(`remove-${kind}-${collection}`).addEventListener('click', () => this.remove(kind, collection));
@@ -199,7 +200,7 @@
                 });
                 $(`${kind}-provider-use-url`).addEventListener('click', () => {
                     const provider = this.current(kind, 'provider');
-                    const url = kind === 'text' ? IMAGE_PROTOCOLS.openai_images.url : IMAGE_PROTOCOLS[provider.type].url;
+                    const url = kind !== 'drawing' ? IMAGE_PROTOCOLS.openai_images.url : IMAGE_PROTOCOLS[provider.type].url;
                     if (provider.api_base_url && provider.api_base_url !== url && !window.confirm('用推荐地址替换当前 Base URL？')) return;
                     provider.api_base_url = url;
                     $(`${kind}-provider-url`).value = url;
@@ -247,6 +248,14 @@
             $('mcp-server-args').addEventListener('input', () => { this.rawFor(this.current('mcp', 'server')).args = $('mcp-server-args').value; });
             $('mcp-server-tools').addEventListener('input', () => { this.rawFor(this.current('mcp', 'server')).tools = $('mcp-server-tools').value; });
             $('test-mcp-server').addEventListener('click', () => this.probeMCP());
+            for (const kind of ['asr', 'tts', 'vision']) {
+                this.bind(`${kind}-enabled`, () => this.draft[kind], 'enabled', 'boolean');
+                this.bind(`ai-${kind}-model`, () => this.draft[kind], 'active_model_id');
+                $(`${kind}-provider-timeout`).step = 'any';
+            }
+            this.bind('vision-model-api-type', () => this.current('vision', 'model'), 'api_type', 'text', () => this.renderParameters('vision'));
+            this.bind('vision-model-token-limit-field', () => this.current('vision', 'model'), 'token_limit_field');
+            this.bind('tts-model-voice', () => this.current('tts', 'model'), 'voice');
             this.setupSearch();
         }
         setupSearch() {
@@ -337,7 +346,8 @@
         renderAll() {
             this.renderPrompts();
             this.renderRoles();
-            for (const kind of ['text', 'drawing']) {
+            for (const kind of ['asr', 'tts', 'vision']) $(`${kind}-enabled`).checked = this.draft[kind].enabled;
+            for (const kind of ['text', 'drawing', 'asr', 'tts', 'vision']) {
                 this.renderList(kind, 'provider'); this.renderProvider(kind);
                 this.renderList(kind, 'model'); this.renderModel(kind);
             }
@@ -368,6 +378,7 @@
         }
         renderRoles() {
             const { text, drawing } = this.draft;
+            for (const kind of ['asr', 'tts', 'vision']) this.fillOptions($(`ai-${kind}-model`), this.draft[kind].models, this.draft[kind].active_model_id, '未指定模型');
             this.fillOptions($('ai-chat-model'), text.models, text.chat_model_id, '未指定聊天模型');
             this.fillOptions($('ai-task-model'), text.models, text.task_model_id, '跟随聊天模型');
             this.fillOptions($('ai-drawing-model'), drawing.models, drawing.active_model_id, '未指定绘画模型');
@@ -417,7 +428,7 @@
             $(`${kind}-provider-clear-key`).checked = Boolean(provider.clear_api_key);
         }
         renderProviderHint(kind, provider) {
-            const protocol = kind === 'text' ? IMAGE_PROTOCOLS.openai_images : kind === 'search' ? SEARCH_PROTOCOLS[provider.type] : IMAGE_PROTOCOLS[provider.type];
+            const protocol = !['drawing', 'search'].includes(kind) ? IMAGE_PROTOCOLS.openai_images : kind === 'search' ? SEARCH_PROTOCOLS[provider.type] : IMAGE_PROTOCOLS[provider.type];
             $(`${kind}-provider-url`).placeholder = protocol?.url || '';
             if (kind === 'search') { $('search-provider-url-hint').textContent = `${protocol?.hint || ''}留空使用官方地址，也可填写代理地址。`; return; }
             $(`${kind}-provider-url-hint`).textContent = `推荐 ${protocol?.url || '服务商提供的地址'}；可填写代理或自定义地址。切换协议不会覆盖地址。`;
@@ -448,11 +459,17 @@
                 $('text-model-supports-tools').checked = Boolean(model.supports_tools);
                 $('text-test-result').hidden = true;
             }
+            if (kind === 'vision') {
+                $('vision-model-api-type').value = model.api_type || 'chat_completions';
+                $('vision-model-token-limit-field').value = model.token_limit_field || 'max_completion_tokens';
+            }
+            if (kind === 'tts') $('tts-model-voice').value = model.voice || 'alloy';
             this.renderParameters(kind);
             this.renderSuggestions(kind);
         }
         parameterDefinitions(kind, model) {
-            if (kind === 'text') return TEXT_PARAMS.filter(param => model.api_type !== 'responses' || !['presence_penalty', 'frequency_penalty'].includes(param.key));
+            if (['text', 'vision'].includes(kind)) return TEXT_PARAMS.filter(param => model.api_type !== 'responses' || !['presence_penalty', 'frequency_penalty'].includes(param.key));
+            if (['asr', 'tts'].includes(kind)) return [];
             const provider = this.draft.drawing.providers.find(item => item.id === model.provider_id);
             return IMAGE_PARAMS[provider?.type] || [];
         }
@@ -461,9 +478,9 @@
             const container = $(`${kind}-model-parameters`);
             container.replaceChildren();
             if (!model) return;
-            if (kind === 'text') $('text-token-field').hidden = model.api_type === 'responses';
+            if (['text', 'vision'].includes(kind)) $(`${kind}-token-field`).hidden = model.api_type === 'responses';
             const definitions = this.parameterDefinitions(kind, model);
-            if (!definitions.length) container.append(node('p', 'muted', '选择图像服务商后，显示对应协议的可选参数。'));
+            if (!definitions.length) container.append(node('p', 'muted', kind === 'drawing' ? '选择图像服务商后，显示对应协议的可选参数。' : '使用服务商默认参数；请确认所选模型支持此能力。'));
             definitions.forEach(param => {
                 const row = node('div', 'ai-parameter');
                 const label = node('label', 'ai-check');
@@ -605,7 +622,7 @@
             const count = this.items(kind, collection).length + 1;
             if (collection === 'provider' && kind === 'search') item = { id: this.newId(), name: `新搜索服务 ${count}`, type: 'exa', enabled: true, api_base_url: '', api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 30 };
             else if (collection === 'provider') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}服务商 ${count}`, api_base_url: IMAGE_PROTOCOLS.openai_images.url, api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 60, ...(kind === 'drawing' ? { type: 'openai_images' } : {}) };
-            else if (collection === 'model') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}模型 ${count}`, provider_id: this.selected[`${kind}-provider`] || '', model: '', parameters: {}, ...(kind === 'text' ? { api_type: 'chat_completions', token_limit_field: 'max_completion_tokens', supports_tools: false } : {}) };
+            else if (collection === 'model') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}模型 ${count}`, provider_id: this.selected[`${kind}-provider`] || '', model: '', parameters: {}, ...(kind === 'tts' ? {voice: 'alloy'} : {}), ...(['text', 'vision'].includes(kind) ? { api_type: 'chat_completions', token_limit_field: 'max_completion_tokens', supports_tools: false } : {}) };
             else item = { id: this.newId(), name: `新工具服务 ${count}`, enabled: false, transport: 'stdio', url: '', command: '', args: [], env: {}, env_set: [], headers: {}, headers_set: [], allowed_tools: [], timeout: 30 };
             this.items(kind, collection).push(item);
             this.selected[`${kind}-${collection}`] = item.id;
@@ -620,7 +637,7 @@
         remove(kind, collection) {
             const item = this.current(kind, collection);
             if (!item) return;
-            const referenced = collection === 'provider' ? this.items(kind, 'model').some(model => model.provider_id === item.id) : collection === 'model' ? (kind === 'text' ? [this.draft.text.chat_model_id, this.draft.text.task_model_id] : [this.draft.drawing.active_model_id]).includes(item.id) : false;
+            const referenced = collection === 'provider' ? this.items(kind, 'model').some(model => model.provider_id === item.id) : collection === 'model' ? (kind === 'text' ? [this.draft.text.chat_model_id, this.draft.text.task_model_id] : [this.draft[kind].active_model_id]).includes(item.id) : false;
             if (referenced) { this.panel.showNotification(collection === 'provider' ? '仍有模型使用这个服务商，请先更改模型的关联服务商。' : '这个模型仍被默认用途引用，请先在上方更改用途选择。', 'warning'); return; }
             if (!window.confirm(`删除「${item.name || '未命名配置'}」？保存后生效。`)) return;
             const items = this.items(kind, collection); items.splice(items.indexOf(item), 1);
@@ -691,9 +708,9 @@
         }
         payload() {
             const ai = clone(this.draft);
-            for (const kind of ['text', 'drawing']) {
+            for (const kind of ['text', 'drawing', 'asr', 'tts', 'vision']) {
                 ai[kind].providers = this.draft[kind].providers.map(provider => this.serializeProvider(kind, provider));
-                const routes = kind === 'text' ? [ai.text.chat_model_id, ai.text.task_model_id] : [ai.drawing.active_model_id];
+                const routes = kind === 'text' ? [ai.text.chat_model_id, ai.text.task_model_id] : [ai[kind].active_model_id];
                 if (routes.some(id => id && !ai[kind].models.some(model => model.id === id))) throw new Error('默认用途引用的模型已不存在，请重新选择。');
                 ai[kind].models = this.draft[kind].models.map(model => this.serializeModel(kind, model, routes.includes(model.id)));
             }
