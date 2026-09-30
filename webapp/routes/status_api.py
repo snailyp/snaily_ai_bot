@@ -19,7 +19,10 @@ def get_status():
             configured[f"{role}_model"] = bool(provider.get("api_base_url") and model.get("model"))
         except ValueError:
             configured[f"{role}_model"] = False
+    from bot.services.web_search import usable_providers
+
     configured.update(bot_token=bool(config_manager.get("telegram.bot_token")),
+                      search_provider=bool(usable_providers(ai_config.get("search", {}))),
                       mcp_enabled=ai_config.get("mcp", {}).get("enabled", False),
                       openai_api_key=configured["chat_model"])
     bot = getattr(current_app, "bot", None)

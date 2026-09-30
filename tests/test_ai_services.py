@@ -7,7 +7,11 @@ from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
+from telegram.error import BadRequest
+
 from test_ai_api import make_manager
+from test_web_search import assert_valid_markdown_v2
+from bot.utils import helpers
 
 _settings = ModuleType("config.settings")
 _settings.config_manager = make_manager()
@@ -100,6 +104,108 @@ class AIServicesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["text"]["models"][0]["model"], "custom-unlisted-model")
         self.assertEqual(current["drawing"], ai["drawing"])
         service.reload_config.assert_awaited_once()
+
+
+class WebSearchServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.manager = make_manager()
+        self.manager.config["ai_services"]["search"]["providers"] = [
+            {"id": "exa-1", "name": "Exa", "type": "exa", "enabled": True, "api_key": "exa-secret",
+             "api_base_url": "", "headers": {}, "timeout": 5},
+        ]
+        self.text = Mock(complete=AsyncMock(return_value="GPT-6 尚未发布 [1]。"), aclose=AsyncMock())
+        self.service = service_module.AIServices(self.manager, self.text, Mock(), Mock(list_tools=AsyncMock()))
+        from bot.services import web_search
+        self.web_search = web_search
+        self.outcome = web_search.SearchOutcome(
+            {"id": "exa-1", "name": "Exa", "type": "exa"},
+            [web_search.SearchResult("搜索 - Microsoft 必应 (中文)", "https://cn.bing.com/?q=a_b", "摘要 a.b-c!")],
+            [],
+        )
+
+    async def test_search_summarizes_with_sources_and_valid_markdown(self):
+        with patch.object(self.web_search, "search", AsyncMock(return_value=self.outcome)) as search:
+            reply = await self.service.search_web("GPT-6", 42)
+        search.assert_awaited_once()
+        provider, model, messages = self.text.complete.call_args.args
+        self.assertEqual(messages[0]["content"], self.web_search.SEARCH_SUMMARY_PROMPT)
+        self.assertIn("摘要 a.b-c!", messages[1]["content"])
+        self.assertIn("[搜索 - Microsoft 必应 (中文)](https://cn.bing.com/?q=a_b)", reply)
+        rendered = helpers.to_markdown_v2(reply)
+        assert_valid_markdown_v2(self, rendered)
+        # 截图中的问题：转义被执行了两次，导致用户看到 \. 和 \-
+        self.assertNotIn("\\\\", rendered)
+        self.assertNotIn("\\", reply)
+
+    async def test_search_error_and_empty_results_are_reported(self):
+        with patch.object(self.web_search, "search", AsyncMock(side_effect=self.web_search.SearchError("Exa 认证失败"))):
+            self.assertIn("Exa 认证失败", await self.service.search_web("q", 1))
+        empty = self.web_search.SearchOutcome(self.outcome.provider, [], [])
+        with patch.object(self.web_search, "search", AsyncMock(return_value=empty)):
+            self.assertIn("没有找到相关结果", await self.service.search_web("q", 1))
+        self.text.complete.assert_not_awaited()
+
+    async def test_without_provider_falls_back_to_labelled_knowledge_answer(self):
+        self.manager.config["ai_services"]["search"]["providers"] = []
+        with patch.object(self.web_search, "search", AsyncMock()) as search:
+            reply = await self.service.search_web("q", 1)
+        search.assert_not_awaited()
+        self.assertIn("尚未配置联网搜索服务", reply)
+
+    async def test_summary_can_be_disabled(self):
+        self.manager.config["ai_services"]["search"]["summarize"] = False
+        with patch.object(self.web_search, "search", AsyncMock(return_value=self.outcome)):
+            reply = await self.service.search_web("q", 1)
+        self.text.complete.assert_not_awaited()
+        self.assertIn("摘要 a.b-c!", reply)
+
+
+class TelegramMarkdownTests(unittest.IsolatedAsyncioTestCase):
+    def update(self, chat_type="private"):
+        message = SimpleNamespace(reply_text=AsyncMock(return_value=Mock()))
+        user = SimpleNamespace(id=7, first_name="A_b.c-d!", username="tester")
+        return SimpleNamespace(message=message, effective_message=message, effective_user=user,
+                               effective_chat=SimpleNamespace(type=chat_type, id=9))
+
+    async def test_start_and_help_send_valid_markdown_v2(self):
+        manager = make_manager()
+        for handler in (common_module.start, common_module.help_command):
+            for chat_type, auto_reply in (("private", True), ("group", False)):
+                manager.config["features"]["chat"]["auto_reply_private"] = auto_reply
+                update = self.update(chat_type)
+                with self.subTest(handler=handler.__name__, chat=chat_type), \
+                        patch.object(common_module, "config_manager", manager), \
+                        patch.object(common_module, "delete_messages_after_delay", AsyncMock()), \
+                        patch.object(common_module.logger, "error") as error:
+                    await handler(update, SimpleNamespace(args=[]))
+                    error.assert_not_called()
+                    text = update.message.reply_text.call_args.args[0]
+                    self.assertEqual(update.message.reply_text.call_args.kwargs["parse_mode"], "MarkdownV2")
+                    assert_valid_markdown_v2(self, text)
+                    if handler is common_module.start:
+                        # 用户名来自 Telegram，同样必须被转义
+                        self.assertIn("A\\_b\\.c\\-d\\!", text)
+
+    async def test_parse_error_falls_back_to_plain_text(self):
+        message = SimpleNamespace(reply_text=AsyncMock(side_effect=[
+            BadRequest("Can't parse entities: character '-' is reserved"), Mock(),
+        ]))
+        await helpers.reply_markdown(message, "**a-b**")
+        self.assertEqual(message.reply_text.await_args_list[1].args, ("**a-b**",))
+        self.assertNotIn("parse_mode", message.reply_text.await_args_list[1].kwargs)
+
+    async def test_other_bad_requests_are_not_swallowed(self):
+        message = SimpleNamespace(reply_text=AsyncMock(side_effect=BadRequest("Message is too long")))
+        with self.assertRaises(BadRequest):
+            await helpers.reply_markdown(message, "text")
+
+    def test_split_keeps_code_fences_balanced(self):
+        text = "intro\n```\n" + "\n".join("x" * 50 for _ in range(100)) + "\n```\nend"
+        parts = helpers.split_text(text, limit=1000)
+        self.assertGreater(len(parts), 1)
+        for part in parts:
+            self.assertLessEqual(len(part), 1010)
+            self.assertEqual(part.count("```") % 2, 0, part[:80])
 
 
 if __name__ == "__main__":

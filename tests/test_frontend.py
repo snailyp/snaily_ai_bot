@@ -172,7 +172,7 @@ class FrontendSmoke(unittest.TestCase):
                 self.navigate(view)
                 self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'), f'Overflow {width}/{view}')
             self.navigate('ai-config')
-            for tab in ['providers', 'models', 'drawing', 'mcp', 'preferences']:
+            for tab in ['providers', 'models', 'drawing', 'mcp', 'search', 'preferences']:
                 self.page.locator(f'#ai-tab-{tab}').click()
                 self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'), f'Overflow {width}/AI/{tab}')
             self.navigate('overview')

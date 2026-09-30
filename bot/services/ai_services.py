@@ -12,6 +12,7 @@ from md2tgmd import escape
 
 from config.ai_config import resolve_image_model, resolve_text_model
 from config.settings import config_manager
+from bot.services import web_search
 from bot.services.image_generation import ImageGenerator, ImageResult
 from bot.services.mcp_client import MCPClientManager
 from bot.services.text_generation import TextGenerationError, TextGenerator, client_options
@@ -53,7 +54,7 @@ class AIServices:
         self,
         history: List[Dict[str, Any]],
         user_id: Optional[int] = None,
-        enable_md2tg: bool = True,
+        enable_md2tg: bool = False,
         *,
         role: str = "chat",
         chat_id: Optional[int] = None,
@@ -101,16 +102,43 @@ class AIServices:
             return None
 
     async def search_web(self, query: str, user_id: Optional[int] = None) -> Optional[str]:
-        # 保留现有知识库摘要行为；未配置真实搜索工具时不声称已联网检索。
-        search_prompt = f"""
+        """联网搜索并返回普通 Markdown；由调用方在发送前统一转换为 MarkdownV2。"""
+        title = f"🔍 **搜索：{web_search.display_text(query)}**"
+        search_config = self.config_manager.get_ai_config().get("search", {})
+        if not web_search.usable_providers(search_config):
+            return await self._knowledge_answer(query, user_id, title)
+        try:
+            outcome = await web_search.search(search_config, query)
+        except web_search.SearchError as exc:
+            logger.warning(f"联网搜索失败 - 用户: {user_id}, 原因: {exc}")
+            return f"{title}\n\n❌ 搜索失败：{exc}"
+        for reason in outcome.errors:
+            logger.warning(f"搜索服务失败，已切换到下一个服务 - 原因: {reason}")
+        label = web_search.provider_label(outcome.provider)
+        logger.info(f"联网搜索完成 - 服务: {label}, 用户: {user_id}, 结果数: {len(outcome.results)}")
+        if not outcome.results:
+            return f"{title}\n\n没有找到相关结果，请换个关键词试试。"
+        answer = None
+        if search_config.get("summarize", True):
+            answer = await self.chat_completion(
+                [{"role": "user", "content": web_search.prompt_context(query, outcome.results)}],
+                user_id, enable_md2tg=False, role="task", system_prompt=web_search.SEARCH_SUMMARY_PROMPT,
+            )
+        sources = web_search.format_sources(outcome.results, with_snippets=not answer)
+        body = f"{answer.strip()}\n\n{sources}" if answer else sources
+        return f"{title}\n\n{body}\n\n_由 {web_search.display_text(label)} 提供搜索结果_"
+
+    async def _knowledge_answer(self, query: str, user_id: Optional[int], title: str) -> Optional[str]:
+        # 未配置搜索服务时退回模型知识，并明确说明没有联网。
+        prompt = f"""
         用户搜索查询: "{query}"
         请基于你的知识库提供相关信息。如果这是一个需要实时信息的查询（如天气、新闻、股价等），
         请说明你无法提供实时信息，并建议用户查看相关官方网站。
         请用简洁明了的中文回答，包含最相关的信息。
         """
-        result = await self.chat_completion([{"role": "user", "content": search_prompt}], user_id, role="task")
+        result = await self.chat_completion([{"role": "user", "content": prompt}], user_id, enable_md2tg=False, role="task")
         if result:
-            return f"🔍 **搜索结果：{query}**\n\n{result}\n\n💡 *注意：以上信息基于AI知识库，如需最新信息请查看官方来源。*"
+            return f"{title}\n\n{result.strip()}\n\n💡 _尚未配置联网搜索服务，以上内容来自 AI 知识库，可能不是最新信息。_"
         return None
 
     async def summarize_messages(self, messages: List[str], chat_title: str = "群聊") -> Optional[str]:

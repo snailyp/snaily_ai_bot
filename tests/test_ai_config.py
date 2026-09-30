@@ -188,6 +188,33 @@ class ValidationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_ai_config(invalid)
 
+    def test_search_providers_are_validated_redacted_and_merged(self):
+        value = sample_config()
+        value["search"]["providers"] = [{"id": "tv", "type": "tavily", "api_key": "tvly-secret"}]
+        value["search"]["active_provider_id"] = "tv"
+        value = validate_ai_config(value)
+        self.assertEqual(value["search"]["providers"][0]["timeout"], 30)
+        self.assertEqual(value["search"]["custom_setting"], "preserved")
+        public = redact_ai_config(value)
+        self.assertNotIn("tvly-secret", json.dumps(public))
+        self.assertTrue(public["search"]["providers"][0]["api_key_set"])
+        merged = validate_ai_config(merge_ai_secrets(value, public))
+        self.assertEqual(merged["search"]["providers"][0]["api_key"], "tvly-secret")
+        cleared = deepcopy(public)
+        cleared["search"]["providers"][0]["clear_api_key"] = True
+        self.assertEqual(merge_ai_secrets(value, cleared)["search"]["providers"][0]["api_key"], "")
+        for path, invalid in (("type", "bing"), ("enabled", "yes"), ("timeout", 0),
+                              ("api_base_url", "ftp://x"), ("unknown", 1)):
+            broken = deepcopy(value)
+            broken["search"]["providers"][0][path] = invalid
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                validate_ai_config(broken)
+        for key, invalid in (("active_provider_id", "missing"), ("max_results", 21), ("summarize", 1)):
+            broken = deepcopy(value)
+            broken["search"][key] = invalid
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate_ai_config(broken)
+
     def test_http_headers_are_safe_case_insensitive_and_secret_errors(self):
         accepted = {"Authorization": "Bearer explicit", "X-Custom": "value"}
         self.assertEqual(validate_headers(accepted), accepted)
@@ -457,6 +484,19 @@ class ConfigManagerTests(unittest.TestCase):
         with patch.dict(os.environ, {"OPENAI_MAX_TOKENS": "345", "OPENAI_TEMPERATURE": "0"}, clear=True):
             value = self.manager._load_ai_config_from_env()
             self.assertEqual(value["text"]["models"][0]["parameters"], {"max_output_tokens": 345, "temperature": 0.0})
+
+    def test_search_keys_from_env_never_override_saved_providers(self):
+        env = {"TAVILY_API_KEY": "tvly-env", "FIRECRAWL_API_KEY": "fc-env", "SEARCH_PROVIDER": "firecrawl"}
+        with patch.dict(os.environ, env, clear=True):
+            search = self.manager._load_ai_config_from_env()["search"]
+            self.assertEqual([item["type"] for item in search["providers"]], ["tavily", "firecrawl"])
+            self.assertEqual(search["active_provider_id"], "env-firecrawl")
+            saved = sample_config()
+            saved["search"]["providers"] = [{"id": "mine", "type": "exa", "api_key": "exa-saved"}]
+            saved = validate_ai_config(saved)
+            self.assertEqual(self.manager._apply_search_env(deepcopy(saved)), saved)
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(self.manager._load_ai_config_from_env()["search"]["providers"], [])
 
     def test_ai_json_env_precedence_and_legacy_array_compatibility(self):
         new = sample_config()

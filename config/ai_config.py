@@ -24,6 +24,8 @@ _IMAGE_PARAMETERS = {
     "gemini": {"aspect_ratio", "image_size"},
     "seedream": {"size", "watermark", "response_format", "seed"},
 }
+_SEARCH_TYPES = {"exa", "tavily", "firecrawl"}
+_SEARCH_PROVIDER_FIELDS = {"id", "name", "type", "enabled", "api_key", "api_base_url", "headers", "timeout"}
 _HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 _BLOCKED_HEADERS = {"host", "content-length", "transfer-encoding", "connection"}
 _PUBLIC_FIELDS = {"api_key_set", "clear_api_key", "headers_set", "env_set"}
@@ -150,7 +152,10 @@ def _defaults():
             "max_rounds": 4, "max_calls": 8, "timeout": 30,
             "max_result_chars": 12000, "servers": [],
         },
-        "search": {"enabled": True, "max_results": 5},
+        "search": {
+            "enabled": True, "max_results": 5, "summarize": True, "fallback": True,
+            "active_provider_id": "", "providers": [],
+        },
     }
 
 
@@ -262,6 +267,13 @@ def normalize_ai_config(raw):
                 "name": "", "enabled": False, "transport": "stdio", "url": "", "command": "",
                 "args": [], "env": {}, "headers": {}, "allowed_tools": [], "timeout": 30,
             })
+    search = value.get("search")
+    if isinstance(search, dict) and isinstance(search.get("providers"), list):
+        for provider in search["providers"]:
+            _fill_defaults(provider, {
+                "name": "", "type": "exa", "enabled": True, "api_key": "",
+                "api_base_url": "", "headers": {}, "timeout": 30,
+            })
     return value
 
 
@@ -351,6 +363,28 @@ def _resolve(section, selection, path):
     return provider, model
 
 
+def _validate_search(search):
+    """Search keeps unknown extension keys; provider rows are strict like other sections."""
+    for name in ("enabled", "summarize", "fallback"):
+        _boolean(search[name], "search." + name)
+    _number(search["max_results"], "search.max_results", minimum=1, maximum=20, integer=True)
+    providers = _rows(search["providers"], "search.providers")
+    for provider in providers.values():
+        path = "search.providers"
+        _only_fields(provider, _SEARCH_PROVIDER_FIELDS, path)
+        _string(provider["name"], path + ".name")
+        _enum(provider["type"], _SEARCH_TYPES, path + ".type")
+        _boolean(provider["enabled"], path + ".enabled")
+        _string(provider["api_key"], path + ".api_key")
+        # Blank means the provider's official endpoint.
+        _url(provider["api_base_url"], path + ".api_base_url")
+        _number(provider["timeout"], path + ".timeout", minimum=0.001)
+        provider["headers"] = validate_headers(provider["headers"])
+    _string(search["active_provider_id"], "search.active_provider_id")
+    if search["active_provider_id"] and search["active_provider_id"] not in providers:
+        _fail("search.active_provider_id", "must select an existing search provider")
+
+
 def validate_ai_config(config):
     """Return canonical validated v2 settings, or a credential-safe ValueError."""
     _object(config, "ai_services")
@@ -422,11 +456,7 @@ def validate_ai_config(config):
         server["headers"] = validate_headers(server["headers"])
         _strings(server["allowed_tools"], path + ".allowed_tools")
         _number(server["timeout"], path + ".timeout", minimum=0.001)
-    search = _object(value["search"], "search")
-    if "enabled" in search:
-        _boolean(search["enabled"], "search.enabled")
-    if "max_results" in search:
-        _number(search["max_results"], "search.max_results", minimum=1, integer=True)
+    _validate_search(_object(value["search"], "search"))
     _json_value(value, "ai_services")
     return value
 
@@ -437,6 +467,8 @@ def _secret_rows(config):
             yield row, True
     for row in config["mcp"]["servers"]:
         yield row, False
+    for row in config["search"]["providers"]:
+        yield row, True
 
 
 def redact_ai_config(config):
@@ -493,6 +525,7 @@ def merge_ai_secrets(current, incoming):
     update = deepcopy(incoming)
     for section_name, collection, provider in (
         ("text", "providers", True), ("drawing", "providers", True), ("mcp", "servers", False),
+        ("search", "providers", True),
     ):
         section = update.get(section_name)
         if not isinstance(section, dict) or collection not in section:

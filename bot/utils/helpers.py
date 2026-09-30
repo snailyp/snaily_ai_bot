@@ -2,9 +2,85 @@
 Bot 辅助工具函数
 """
 
-from typing import Optional, Union
+from typing import List, Optional, Union
 
+from loguru import logger
+from md2tgmd import escape as _md2tgmd_escape
 from telegram import Message, Update
+from telegram.error import BadRequest
+
+# MarkdownV2 转义后长度会增加，原文按更小的块切分，给转义留出余量。
+TELEGRAM_TEXT_LIMIT = 4096
+MARKDOWN_CHUNK_CHARS = 3000
+
+
+def to_markdown_v2(text: str) -> str:
+    """把普通 Markdown（**粗体**、`代码`、[链接](url)）转换为 Telegram MarkdownV2。
+
+    约定：业务代码只编写普通 Markdown，并且只在发送前调用一次。
+    对已经转换过的文本再次调用会出现可见的 \\. 和 \\-。
+    """
+    return _md2tgmd_escape(text or "")
+
+
+def _is_parse_error(exc: BadRequest) -> bool:
+    return "parse entities" in str(exc).lower()
+
+
+def split_text(text: str, limit: int = MARKDOWN_CHUNK_CHARS) -> List[str]:
+    """按行切分长文本，尽量不在代码块中间断开；单行过长时强制切分。"""
+    parts, current, in_code = [], "", False
+    for line in (text or "").split("\n"):
+        while len(line) > limit:
+            if current:
+                parts.append(current.rstrip("\n"))
+                current = ""
+            parts.append(line[:limit])
+            line = line[limit:]
+        candidate = current + line + "\n"
+        if len(candidate) > limit and current and not in_code:
+            parts.append(current.rstrip("\n"))
+            candidate = line + "\n"
+        elif len(candidate) > limit and current:
+            # 代码块过长时只能切开，并为两段分别补全围栏。
+            parts.append(current.rstrip("\n") + "\n```")
+            candidate = "```\n" + line + "\n"
+        current = candidate
+        if line.lstrip().startswith("```"):
+            in_code = not in_code
+    if current.strip():
+        parts.append(current.rstrip("\n"))
+    return parts or [""]
+
+
+async def reply_markdown(message: Message, text: str, **kwargs) -> Message:
+    """以 MarkdownV2 回复普通 Markdown 文本；解析失败时退回纯文本，保证消息一定能送达。"""
+    try:
+        return await message.reply_text(to_markdown_v2(text), parse_mode="MarkdownV2", **kwargs)
+    except BadRequest as exc:
+        if not _is_parse_error(exc):
+            raise
+        logger.warning(f"MarkdownV2 解析失败，改用纯文本发送: {exc}")
+        return await message.reply_text(text, **kwargs)
+
+
+async def send_markdown(bot, chat_id: Union[int, str], text: str, **kwargs) -> Message:
+    """与 reply_markdown 相同，用于没有原消息可回复的定时任务。"""
+    try:
+        return await bot.send_message(chat_id=chat_id, text=to_markdown_v2(text), parse_mode="MarkdownV2", **kwargs)
+    except BadRequest as exc:
+        if not _is_parse_error(exc):
+            raise
+        logger.warning(f"MarkdownV2 解析失败，改用纯文本发送: {exc}")
+        return await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+
+
+async def reply_markdown_long(message: Message, text: str, **kwargs) -> Optional[Message]:
+    """分段发送长 Markdown 文本，返回最后一条消息。"""
+    sent = None
+    for index, part in enumerate(split_text(text)):
+        sent = await reply_markdown(message, part if index == 0 else f"📄 **续：**\n\n{part}", **kwargs)
+    return sent
 
 
 def escape_markdown_v2(text: str) -> str:

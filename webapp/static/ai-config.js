@@ -16,6 +16,11 @@
         gemini: { name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta', models: ['gemini-2.5-flash-image', 'gemini-3.1-flash-image-preview'] },
         seedream: { name: '火山方舟 Seedream', url: 'https://ark.cn-beijing.volces.com/api/v3', models: ['doubao-seedream-4-0-250828'] }
     };
+    const SEARCH_PROTOCOLS = {
+        exa: { name: 'Exa', url: 'https://api.exa.ai', hint: 'Exa：语义检索，返回网页高亮片段。' },
+        tavily: { name: 'Tavily', url: 'https://api.tavily.com', hint: 'Tavily：面向 AI 的搜索接口，密钥通常以 tvly- 开头。' },
+        firecrawl: { name: 'Firecrawl', url: 'https://api.firecrawl.dev/v2', hint: 'Firecrawl：搜索网页并返回标题与摘要，密钥通常以 fc- 开头。' }
+    };
     const TEXT_PARAMS = [
         { key: 'temperature', label: '温度', type: 'number', min: 0, max: 2, hint: 'temperature · 0–2' },
         { key: 'top_p', label: '核采样', type: 'number', min: 0, max: 1, hint: 'top_p · 0–1' },
@@ -77,7 +82,8 @@
                 ...ai, schema_version: 2,
                 text: { providers: [], models: [], chat_model_id: '', task_model_id: '', ...ai.text },
                 drawing: { providers: [], models: [], active_model_id: '', ...ai.drawing },
-                mcp: { enabled: false, admin_only: true, allowed_user_ids: [], allowed_chat_ids: [], max_rounds: 4, max_calls: 8, timeout: 30, max_result_chars: 12000, servers: [], ...ai.mcp }
+                mcp: { enabled: false, admin_only: true, allowed_user_ids: [], allowed_chat_ids: [], max_rounds: 4, max_calls: 8, timeout: 30, max_result_chars: 12000, servers: [], ...ai.mcp },
+                search: { enabled: true, max_results: 5, summarize: true, fallback: true, active_provider_id: '', providers: [], ...ai.search }
             };
             this.raw = new WeakMap();
             this.secretRows = new WeakMap();
@@ -88,6 +94,7 @@
                 for (const collection of ['provider', 'model']) this.ensureSelection(kind, collection);
             }
             this.ensureSelection('mcp', 'server');
+            this.ensureSelection('search', 'provider');
             $('chat-history-enabled').checked = this.chat.history_enabled ?? true;
             $('chat-history-max-length').value = this.chat.history_max_length ?? 10;
             $('chat-auto-reply-private').checked = this.chat.auto_reply_private ?? false;
@@ -97,13 +104,14 @@
             $('ai-validation').hidden = true;
         }
 
-        items(kind, collection) { return this.draft[kind][`${collection}s`]; }
+        // 搜索只有服务列表，没有模型列表；缺少的集合按空列表处理。
+        items(kind, collection) { return this.draft[kind][`${collection}s`] || []; }
         current(kind, collection) { return this.items(kind, collection).find(item => item.id === this.selected[`${kind}-${collection}`]); }
         ensureSelection(kind, collection) {
             if (!this.current(kind, collection)) this.selected[`${kind}-${collection}`] = this.items(kind, collection)[0]?.id || '';
         }
         newId() {
-            const ids = new Set(['text', 'drawing', 'mcp'].flatMap(kind => kind === 'mcp' ? this.draft.mcp.servers.map(item => item.id) : [...this.draft[kind].providers, ...this.draft[kind].models].map(item => item.id)));
+            const ids = new Set([...this.draft.mcp.servers, ...this.draft.search.providers, ...['text', 'drawing'].flatMap(kind => [...this.draft[kind].providers, ...this.draft[kind].models])].map(item => item.id));
             let id;
             do {
                 id = globalThis.crypto?.randomUUID?.() || `ai-${Date.now().toString(36)}-${(++this.sequence).toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -112,7 +120,7 @@
         }
 
         setup() {
-            for (const id of ['text-provider-timeout', 'drawing-provider-timeout', 'mcp-timeout', 'mcp-server-timeout']) $(id).step = 'any';
+            for (const id of ['text-provider-timeout', 'drawing-provider-timeout', 'search-provider-timeout', 'mcp-timeout', 'mcp-server-timeout']) $(id).step = 'any';
             const tabs = [...document.querySelectorAll('[data-ai-tab]')];
             tabs.forEach((tab, index) => {
                 tab.addEventListener('click', () => this.showTab(tab.dataset.aiTab));
@@ -206,6 +214,42 @@
             $('mcp-server-args').addEventListener('input', () => { this.rawFor(this.current('mcp', 'server')).args = $('mcp-server-args').value; });
             $('mcp-server-tools').addEventListener('input', () => { this.rawFor(this.current('mcp', 'server')).tools = $('mcp-server-tools').value; });
             $('test-mcp-server').addEventListener('click', () => this.probeMCP());
+            this.setupSearch();
+        }
+        setupSearch() {
+            $('add-search-provider').addEventListener('click', () => this.add('search', 'provider'));
+            $('remove-search-provider').addEventListener('click', () => this.remove('search', 'provider'));
+            for (const [suffix, key, type] of [['name', 'name'], ['url', 'api_base_url'], ['timeout', 'timeout', 'number'], ['key', 'api_key'], ['type', 'type'], ['enabled', 'enabled', 'boolean']]) {
+                this.bind(`search-provider-${suffix}`, () => this.current('search', 'provider'), key, type, () => {
+                    const provider = this.current('search', 'provider');
+                    if (suffix === 'key') { if (provider.api_key) provider.clear_api_key = false; this.renderKeyStatus('search', provider); }
+                    if (suffix === 'type') this.renderProviderHint('search', provider);
+                    this.renderList('search', 'provider');
+                    this.renderSearchState();
+                });
+            }
+            this.bind('search-provider-clear-key', () => this.current('search', 'provider'), 'clear_api_key', 'boolean', () => {
+                const provider = this.current('search', 'provider');
+                if (provider.clear_api_key) { provider.api_key = ''; $('search-provider-key').value = ''; }
+                this.renderKeyStatus('search', provider);
+                this.renderSearchState();
+            });
+            $('search-provider-use-url').addEventListener('click', () => {
+                const provider = this.current('search', 'provider');
+                const url = SEARCH_PROTOCOLS[provider.type]?.url || '';
+                if (provider.api_base_url && provider.api_base_url !== url && !window.confirm('用官方地址替换当前 Base URL？')) return;
+                provider.api_base_url = url;
+                $('search-provider-url').value = url;
+                this.dirty();
+            });
+            for (const [id, key, type] of [['search-enabled', 'enabled', 'boolean'], ['search-summarize', 'summarize', 'boolean'], ['search-fallback', 'fallback', 'boolean'], ['search-max-results', 'max_results', 'number']]) {
+                this.bind(id, () => this.draft.search, key, type, () => this.renderSearchState());
+            }
+            $('search-active-provider').addEventListener('change', () => {
+                this.draft.search.active_provider_id = $('search-active-provider').value;
+                this.renderList('search', 'provider');
+                this.renderSearchState();
+            });
         }
 
         bind(id, owner, key, type = 'text', after = () => {}) {
@@ -232,6 +276,23 @@
                 this.renderList(kind, 'model'); this.renderModel(kind);
             }
             this.renderMCP();
+            this.renderSearch();
+        }
+        renderSearch() {
+            const search = this.draft.search;
+            $('search-enabled').checked = search.enabled !== false;
+            $('search-summarize').checked = search.summarize !== false;
+            $('search-fallback').checked = search.fallback !== false;
+            $('search-max-results').value = search.max_results ?? 5;
+            this.renderList('search', 'provider');
+            this.renderProvider('search');
+            this.renderSearchState();
+        }
+        renderSearchState() {
+            const search = this.draft.search;
+            this.fillOptions($('search-active-provider'), search.providers, search.active_provider_id, '自动 · 第一个可用服务');
+            const ready = search.providers.filter(item => item.enabled !== false && !item.clear_api_key && (item.api_key || item.api_key_set));
+            $('search-draft-state').textContent = search.enabled === false ? '已关闭' : ready.length ? `${ready.length} 个可用服务` : '未配置密钥';
         }
         fillOptions(select, items, value, empty) {
             select.replaceChildren(new Option(empty, ''));
@@ -258,7 +319,7 @@
                 button.dataset.profileId = item.id;
                 button.setAttribute('aria-pressed', String(item.id === this.selected[`${kind}-${collection}`]));
                 const title = node('span', 'ai-library-title', item.name || `未命名 ${index + 1}`);
-                let detail = collection === 'provider' ? (kind === 'drawing' ? IMAGE_PROTOCOLS[item.type]?.name : 'OpenAI 兼容接口') : collection === 'server' ? `${item.transport} · ${item.enabled ? '已启用' : '未启用'}` : item.model || '尚未填写模型 ID';
+                let detail = collection === 'provider' ? (kind === 'drawing' ? IMAGE_PROTOCOLS[item.type]?.name : kind === 'search' ? `${SEARCH_PROTOCOLS[item.type]?.name || '未知服务'} · ${item.enabled === false ? '已停用' : this.draft.search.active_provider_id === item.id ? '首选' : '已启用'}` : 'OpenAI 兼容接口') : collection === 'server' ? `${item.transport} · ${item.enabled ? '已启用' : '未启用'}` : item.model || '尚未填写模型 ID';
                 if (collection === 'model') {
                     const roles = kind === 'drawing' ? (this.draft.drawing.active_model_id === item.id ? ['默认绘画'] : []) : [this.draft.text.chat_model_id === item.id ? '聊天' : '', this.draft.text.task_model_id === item.id ? '任务' : ''].filter(Boolean);
                     if (roles.length) detail = `${roles.join(' / ')} · ${detail}`;
@@ -290,8 +351,9 @@
             $(`${kind}-provider-clear-key`).checked = Boolean(provider.clear_api_key);
         }
         renderProviderHint(kind, provider) {
-            const protocol = kind === 'text' ? IMAGE_PROTOCOLS.openai_images : IMAGE_PROTOCOLS[provider.type];
+            const protocol = kind === 'text' ? IMAGE_PROTOCOLS.openai_images : kind === 'search' ? SEARCH_PROTOCOLS[provider.type] : IMAGE_PROTOCOLS[provider.type];
             $(`${kind}-provider-url`).placeholder = protocol?.url || '';
+            if (kind === 'search') { $('search-provider-url-hint').textContent = `${protocol?.hint || ''}留空使用官方地址，也可填写代理地址。`; return; }
             $(`${kind}-provider-url-hint`).textContent = `推荐 ${protocol?.url || '服务商提供的地址'}；可填写代理或自定义地址。切换协议不会覆盖地址。`;
         }
         renderProvider(kind) {
@@ -299,6 +361,7 @@
             if (!provider) return;
             for (const [suffix, key] of [['name', 'name'], ['url', 'api_base_url'], ['timeout', 'timeout'], ['key', 'api_key']]) $(`${kind}-provider-${suffix}`).value = provider[key] ?? (key === 'timeout' ? 60 : '');
             if (kind === 'drawing') $('drawing-provider-type').value = provider.type;
+            if (kind === 'search') { $('search-provider-type').value = provider.type; $('search-provider-enabled').checked = provider.enabled !== false; }
             this.renderKeyStatus(kind, provider);
             this.renderProviderHint(kind, provider);
             this.renderSecrets($(`${kind}-provider-headers`), provider, 'headers', '请求头');
@@ -474,7 +537,8 @@
         add(kind, collection) {
             let item;
             const count = this.items(kind, collection).length + 1;
-            if (collection === 'provider') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}服务商 ${count}`, api_base_url: IMAGE_PROTOCOLS.openai_images.url, api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 60, ...(kind === 'drawing' ? { type: 'openai_images' } : {}) };
+            if (collection === 'provider' && kind === 'search') item = { id: this.newId(), name: `新搜索服务 ${count}`, type: 'exa', enabled: true, api_base_url: '', api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 30 };
+            else if (collection === 'provider') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}服务商 ${count}`, api_base_url: IMAGE_PROTOCOLS.openai_images.url, api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 60, ...(kind === 'drawing' ? { type: 'openai_images' } : {}) };
             else if (collection === 'model') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}模型 ${count}`, provider_id: this.selected[`${kind}-provider`] || '', model: '', parameters: {}, ...(kind === 'text' ? { api_type: 'chat_completions', token_limit_field: 'max_completion_tokens', supports_tools: false } : {}) };
             else item = { id: this.newId(), name: `新工具服务 ${count}`, enabled: false, transport: 'stdio', url: '', command: '', args: [], env: {}, env_set: [], headers: {}, headers_set: [], allowed_tools: [], timeout: 30 };
             this.items(kind, collection).push(item);
@@ -483,21 +547,24 @@
             if (collection === 'provider') { this.renderProvider(kind); this.renderModelProviderOptions(kind); }
             else if (collection === 'model') { this.renderModel(kind); this.renderRoles(); }
             else this.renderServer();
+            if (kind === 'search') this.renderSearchState();
             this.dirty();
             $(`${kind}-${collection}-name`).focus();
         }
         remove(kind, collection) {
             const item = this.current(kind, collection);
             if (!item) return;
-            const referenced = collection === 'provider' ? this.draft[kind].models.some(model => model.provider_id === item.id) : collection === 'model' ? (kind === 'text' ? [this.draft.text.chat_model_id, this.draft.text.task_model_id] : [this.draft.drawing.active_model_id]).includes(item.id) : false;
+            const referenced = collection === 'provider' ? this.items(kind, 'model').some(model => model.provider_id === item.id) : collection === 'model' ? (kind === 'text' ? [this.draft.text.chat_model_id, this.draft.text.task_model_id] : [this.draft.drawing.active_model_id]).includes(item.id) : false;
             if (referenced) { this.panel.showNotification(collection === 'provider' ? '仍有模型使用这个服务商，请先更改模型的关联服务商。' : '这个模型仍被默认用途引用，请先在上方更改用途选择。', 'warning'); return; }
             if (!window.confirm(`删除「${item.name || '未命名配置'}」？保存后生效。`)) return;
             const items = this.items(kind, collection); items.splice(items.indexOf(item), 1);
+            if (kind === 'search' && this.draft.search.active_provider_id === item.id) this.draft.search.active_provider_id = '';
             this.ensureSelection(kind, collection);
             this.renderList(kind, collection);
             if (collection === 'provider') { this.renderProvider(kind); this.renderModelProviderOptions(kind); }
             else if (collection === 'model') { this.renderModel(kind); this.renderRoles(); }
             else this.renderServer();
+            if (kind === 'search') this.renderSearchState();
             this.dirty();
             $(`add-${kind}-${collection}`).focus();
         }
@@ -565,6 +632,11 @@
                 ai[kind].models = this.draft[kind].models.map(model => this.serializeModel(kind, model, routes.includes(model.id)));
             }
             ai.mcp.servers = this.draft.mcp.servers.map(server => this.serializeServer(server));
+            try {
+                ai.search.providers = this.draft.search.providers.map(provider => this.serializeProvider('search', provider));
+                ai.search.max_results = this.number(ai.search.max_results, '返回结果数', 1, 20);
+                if (!ai.search.providers.some(item => item.id === ai.search.active_provider_id)) ai.search.active_provider_id = '';
+            } catch (error) { error.aiTab ||= 'search'; throw error; }
             try {
                 for (const [key, label] of [['max_rounds', '最多工具轮数'], ['max_calls', '最多调用次数'], ['max_result_chars', '结果字符上限']]) ai.mcp[key] = this.number(ai.mcp[key], label, 1);
                 ai.mcp.timeout = this.number(ai.mcp.timeout, '总超时', 0.001, Infinity, false);

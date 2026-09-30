@@ -171,11 +171,39 @@ class ConfigManager:
                     logger.warning(f"环境变量 {env_name} 格式无效，已忽略")
         return [entry]
 
+    _SEARCH_ENV_KEYS = (("exa", "EXA_API_KEY", "Exa"), ("tavily", "TAVILY_API_KEY", "Tavily"),
+                        ("firecrawl", "FIRECRAWL_API_KEY", "Firecrawl"))
+
+    def _search_providers_from_env(self) -> list:
+        """EXA/TAVILY/FIRECRAWL_API_KEY 各生成一个稳定 ID 的搜索服务。"""
+        return [
+            {"id": f"env-{kind}", "name": name, "type": kind, "enabled": True,
+             "api_key": os.getenv(env_name, "").strip(), "api_base_url": "", "headers": {}, "timeout": 30}
+            for kind, env_name, name in self._SEARCH_ENV_KEYS if os.getenv(env_name, "").strip()
+        ]
+
+    def _apply_search_env(self, ai_config: Dict[str, Any]) -> Dict[str, Any]:
+        """只在尚未配置任何搜索服务时补充环境变量，绝不覆盖面板中保存的服务。"""
+        search = ai_config.get("search")
+        if not isinstance(search, dict) or search.get("providers"):
+            return ai_config
+        providers = self._search_providers_from_env()
+        if not providers:
+            return ai_config
+        preferred = os.getenv("SEARCH_PROVIDER", "").strip().lower()
+        search["providers"] = providers
+        search["active_provider_id"] = next(
+            (item["id"] for item in providers if item["type"] == preferred), providers[0]["id"]
+        )
+        return ai_config
+
     def _load_ai_config_from_env(self) -> Dict[str, Any]:
         """AI_SERVICES_JSON supersedes legacy AI variables, not saved Redis edits."""
         search = {
             "enabled": self._env_bool("SEARCH_ENABLED", True),
             "max_results": self._env_int("SEARCH_MAX_RESULTS", 5),
+            "summarize": self._env_bool("SEARCH_SUMMARIZE", True),
+            "fallback": self._env_bool("SEARCH_FALLBACK", True),
         }
         raw = os.getenv("AI_SERVICES_JSON", "").strip()
         if raw:
@@ -197,7 +225,7 @@ class ConfigManager:
                 },
                 "search": search,
             }
-        return validate_ai_config(normalize_ai_config(value))
+        return validate_ai_config(self._apply_search_env(normalize_ai_config(value)))
 
     def load_config(self) -> None:
         """从 Redis 缓存或环境变量加载配置"""
@@ -237,9 +265,9 @@ class ConfigManager:
                 candidate = json.loads(config_data)
                 if not isinstance(candidate, dict):
                     raise ValueError("configuration: must be an object")
-                candidate["ai_services"] = validate_ai_config(
+                candidate["ai_services"] = validate_ai_config(self._apply_search_env(
                     normalize_ai_config(candidate.get("ai_services", {}))
-                )
+                ))
                 with self._lock:
                     self.config = candidate
                 return True

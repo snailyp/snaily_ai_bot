@@ -288,14 +288,14 @@ class BotControlPanel {
         const container = document.getElementById('status-overview');
         const configStatus = status.config_status || {};
         container.replaceChildren();
-        [['Telegram Bot', configStatus.bot_token], ['聊天模型', configStatus.chat_model], ['任务模型', configStatus.task_model], ['绘画模型', configStatus.drawing_model], ['MCP 工具', configStatus.mcp_enabled]].forEach(([name, configured]) => {
+        [['Telegram Bot', configStatus.bot_token], ['聊天模型', configStatus.chat_model], ['任务模型', configStatus.task_model], ['绘画模型', configStatus.drawing_model], ['联网搜索', configStatus.search_provider], ['MCP 工具', configStatus.mcp_enabled]].forEach(([name, configured]) => {
             const row = document.createElement('div');
             row.className = 'connection-row';
             const label = document.createElement('span');
             label.textContent = name;
             const state = document.createElement('span');
             state.className = `state-label${configured ? '' : ' warning'}`;
-            state.textContent = name === 'MCP 工具' ? (configured ? '已启用 · 未验证连接' : '未启用') : (configured ? '已配置' : '未配置');
+            state.textContent = name === 'MCP 工具' ? (configured ? '已启用 · 未验证连接' : '未启用') : name === '联网搜索' ? (configured ? '已配置' : '未配置 · 使用知识库') : (configured ? '已配置' : '未配置');
             row.append(label, state);
             container.append(row);
         });

@@ -5,8 +5,9 @@
 import asyncio
 
 from loguru import logger
-from md2tgmd import escape
 from telegram import Update
+
+from bot.utils.helpers import reply_markdown, send_markdown
 from telegram.ext import ContextTypes
 
 from config.settings import config_manager
@@ -88,9 +89,7 @@ async def new_member_handler(
             )
 
             # 发送欢迎消息
-            sent_message = await context.bot.send_message(
-                chat_id=chat.id, text=escape(welcome_message), parse_mode="MarkdownV2"
-            )
+            sent_message = await send_markdown(context.bot, chat.id, welcome_message)
 
             logger.info(
                 f"发送欢迎消息 - 群聊: {chat.id} ({chat.title}), 新成员: {user.id} ({user_mention})"
@@ -156,10 +155,10 @@ async def welcome_test_command(
             chat_title=chat.title or "群聊",
         )
 
-        await message.reply_text(
+        await reply_markdown(
+            message,
             f"🧪 **欢迎消息测试**\n\n{test_message}\n\n"
             "💡 这是当前配置的欢迎消息效果预览。",
-            parse_mode="MarkdownV2",
         )
 
         logger.info(f"管理员 {user.id} 测试了欢迎消息")
@@ -198,7 +197,8 @@ async def set_welcome_command(
             current_message = config_manager.get(
                 "features.welcome_message.message", "默认欢迎消息"
             )
-            await message.reply_text(
+            await reply_markdown(
+                message,
                 f"请在命令后输入新的欢迎消息。\n\n"
                 f"**当前欢迎消息：**\n{current_message}\n\n"
                 f"**可用变量：**\n"
@@ -207,7 +207,6 @@ async def set_welcome_command(
                 f"• `{{chat_title}}` - 群聊标题\n\n"
                 f"**示例：**\n"
                 f"`/set_welcome 欢迎 {{user_mention}} 加入 {{chat_title}}！请阅读群规。`",
-                parse_mode="MarkdownV2",
             )
             return
 
@@ -224,11 +223,11 @@ async def set_welcome_command(
             chat_title=chat.title or "群聊",
         )
 
-        await message.reply_text(
+        await reply_markdown(
+            message,
             f"✅ **欢迎消息已更新**\n\n"
             f"**新消息预览：**\n{test_message}\n\n"
             f"配置已保存并立即生效。",
-            parse_mode="MarkdownV2",
         )
 
         logger.info(f"管理员 {user.id} 更新了欢迎消息")

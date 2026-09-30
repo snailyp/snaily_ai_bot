@@ -9,77 +9,18 @@ from telegram.ext import ContextTypes
 from bot.handlers.common import delete_messages_after_delay
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
-from bot.utils.helpers import escape_markdown_v2
+from bot.utils.helpers import reply_markdown, reply_markdown_long
 from config.settings import config_manager
 
 
-async def _send_long_message(
-    update: Update, message: str, parse_mode: str = "MarkdownV2"
-) -> None:
-    """分割并发送长消息"""
+async def _send_long_message(update: Update, message: str) -> None:
+    """分段发送普通 Markdown 文本；转换为 MarkdownV2 只在发送时进行一次。"""
     if not update.effective_message:
         logger.warning(
             "_send_long_message received an update without an effective_message."
         )
         return
-
-    max_length = 4000
-
-    # 如果消息不超过限制，直接发送
-    if len(message) <= max_length:
-        await update.effective_message.reply_text(message, parse_mode=parse_mode)
-        return
-
-    # 分割消息
-    parts = []
-    current_part = ""
-
-    # 按行分割消息，尽量保持完整性
-    lines = message.split("\n")
-
-    for line in lines:
-        # 如果当前行本身就超过限制，需要强制分割
-        if len(line) > max_length:
-            # 先保存当前部分（如果有内容）
-            if current_part:
-                parts.append(current_part.strip())
-                current_part = ""
-
-            # 强制分割长行
-            while len(line) > max_length:
-                parts.append(line[:max_length])
-                line = line[max_length:]
-
-            # 剩余部分作为新的当前部分
-            if line:
-                current_part = line + "\n"
-        else:
-            # 检查添加这行后是否会超过限制
-            test_part = current_part + line + "\n"
-            if len(test_part) > max_length:
-                # 超过限制，保存当前部分并开始新部分
-                if current_part:
-                    parts.append(current_part.strip())
-                current_part = line + "\n"
-            else:
-                # 不超过限制，添加到当前部分
-                current_part = test_part
-
-    # 添加最后一部分
-    if current_part:
-        parts.append(current_part.strip())
-
-    # 发送所有部分
-    for i, part in enumerate(parts):
-        if i == 0:
-            # 第一部分保持原有格式
-            await update.effective_message.reply_text(part, parse_mode=parse_mode)
-        else:
-            # 后续部分添加续接标识
-            # 注意：这里的 "📄 **续：**" 是我们自己控制的，所以是安全的
-            await update.effective_message.reply_text(
-                f"📄 *续：*\n\n{part}", parse_mode=parse_mode
-            )
+    await reply_markdown_long(update.effective_message, message)
 
 
 async def _chat_with_ai(update: Update, text: str) -> None:
@@ -143,7 +84,7 @@ async def _chat_with_ai(update: Update, text: str) -> None:
             await thinking_message.delete()
 
             # 使用统一的长消息发送函数
-            await _send_long_message(update, ai_response, parse_mode="MarkdownV2")
+            await _send_long_message(update, ai_response)
         else:
             await thinking_message.edit_text("抱歉，AI 服务暂时不可用，请稍后再试。")
 
@@ -181,17 +122,17 @@ async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # 获取用户输入
         if not context.args:
             if is_private_chat and auto_reply_enabled:
-                await update.effective_message.reply_text(
-                    "💡 *小提示：* 在私聊中，您可以直接发送消息与我对话，无需使用 `/chat` 命令！\n\n"
+                await reply_markdown(
+                    update.effective_message,
+                    "💡 **小提示：** 在私聊中，您可以直接发送消息与我对话，无需使用 `/chat` 命令！\n\n"
                     "当然，您也可以继续使用命令格式：\n"
                     "例如：`/chat 你好，请介绍一下自己`",
-                    parse_mode="MarkdownV2",
                 )
             else:
-                await update.effective_message.reply_text(
+                await reply_markdown(
+                    update.effective_message,
                     "请在命令后输入您想要对话的内容。\n\n"
                     "例如：`/chat 你好，请介绍一下自己`",
-                    parse_mode="MarkdownV2",
                 )
             return
 
@@ -226,9 +167,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         # 获取搜索查询
         if not context.args:
-            await update.effective_message.reply_text(
-                "请在命令后输入您想要搜索的内容。\n\n" "例如：`/search 今天的天气`",
-                parse_mode="MarkdownV2",
+            await reply_markdown(
+                update.effective_message,
+                "请在命令后输入您想要搜索的内容。\n\n例如：`/search 今天的天气`",
             )
             return
 
@@ -246,21 +187,8 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             # 删除"正在搜索"消息并发送结果
             await searching_message.delete()
 
-            # 获取短消息阈值配置
-            short_message_threshold = config_manager.get(
-                "features.chat.short_message_threshold", 1024
-            )
-
-            # 根据消息长度选择 parse_mode 和处理方式
-            if len(search_result) < short_message_threshold:
-                parse_mode = "Markdown"
-                response_content = search_result
-            else:
-                parse_mode = "MarkdownV2"
-                response_content = escape_markdown_v2(search_result)
-
-            # 使用统一的长消息发送函数
-            await _send_long_message(update, response_content, parse_mode=parse_mode)
+            # search_web 返回普通 Markdown，这里只转换一次，不再二次转义。
+            await _send_long_message(update, search_result)
         else:
             await searching_message.edit_text("抱歉，搜索服务暂时不可用，请稍后再试。")
 

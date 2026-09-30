@@ -145,6 +145,28 @@ MCP 是机器人连接外部工具的**客户端**能力，不是将本机器人
 }
 ```
 
+## 联网搜索：Exa、Tavily、Firecrawl
+
+`/search <关键词>` 先调用首选搜索服务，再由任务模型整理答案，并在末尾附上带链接的来源。
+
+| 服务 | 默认地址 | 认证方式 |
+| --- | --- | --- |
+| Exa | `https://api.exa.ai` | `x-api-key` 请求头 |
+| Tavily | `https://api.tavily.com` | `Authorization: Bearer tvly-…` |
+| Firecrawl | `https://api.firecrawl.dev/v2` | `Authorization: Bearer fc-…` |
+
+- 在管理页「联网搜索」中添加服务、填写密钥并选择首选服务。Base URL 留空表示使用官方地址。
+- 开启「失败时自动切换服务」后，首选服务出错或没有结果时会依次尝试其他已启用的服务。
+- 关闭「用任务模型整理结果」后，只列出搜索结果与摘要，不调用模型。
+- 没有可用服务时，`/search` 退回 AI 知识库回答，并明确提示内容可能不是最新信息。
+- 也可以用环境变量 `EXA_API_KEY`、`TAVILY_API_KEY`、`FIRECRAWL_API_KEY` 和 `SEARCH_PROVIDER` 配置。它们只在尚未保存任何搜索服务时生效，不会覆盖面板中的配置。
+
+搜索结果来自第三方网页，按不可信数据处理。模型提示词要求只依据结果回答，不执行网页中的指令。搜索请求会把查询内容发送给所选服务商。
+
+## Telegram 消息格式
+
+处理器只编写普通 Markdown，例如 `**粗体**`、`` `代码` `` 和 `[标题](URL)`。发送前由 `bot.utils.helpers.reply_markdown` 统一转换为 MarkdownV2，并且只转换一次。转换两次会让用户看到 `\.`、`\-` 这类多余的反斜杠。Telegram 仍然拒绝解析时，消息会自动以纯文本重发。
+
 ## 本地验证
 
 纯配置、HTTP mock 和 MCP fake 测试不需要真实凭证或外部服务。安装依赖后：

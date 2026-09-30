@@ -13,6 +13,7 @@ from telegram.ext import ContextTypes
 from bot.handlers.common import delete_messages_after_delay
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
+from bot.utils.helpers import reply_markdown, reply_markdown_long, send_markdown
 from config.settings import config_manager
 
 
@@ -96,11 +97,7 @@ async def generate_and_send_summary(application, chat_id: int, hours: int = 24):
         if summary:
             # 发送总结消息
             final_summary = f"📝 **过去 {hours} 小时自动总结：**\n\n{summary}"
-            await application.bot.send_message(
-                chat_id=chat_id,
-                text=final_summary,
-                parse_mode="MarkdownV2",
-            )
+            await send_markdown(application.bot, chat_id, final_summary)
             logger.info(f"成功发送自动总结到聊天 {chat_id}")
         else:
             logger.warning(f"为聊天 {chat_id} 生成总结失败，不发送任何消息")
@@ -152,8 +149,8 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
                 if summary:
                     await generating_message.delete()
-                    bot_message = await message.reply_text(
-                        f"📝 **消息总结：**\n\n{summary}", parse_mode="MarkdownV2"
+                    bot_message = await reply_markdown(
+                        message, f"📝 **消息总结：**\n\n{summary}"
                     )
                     # 添加消息自动删除功能
                     asyncio.create_task(
@@ -218,9 +215,7 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             summary_with_stats += f"• 消息数量: {message_count} 条\n"
             summary_with_stats += f"• 活跃用户: {stats['active_users']} 人"
 
-            bot_message = await message.reply_text(
-                summary_with_stats, parse_mode="MarkdownV2"
-            )
+            bot_message = await reply_markdown_long(message, summary_with_stats)
             # 添加消息自动删除功能 - 群聊总结300秒后删除
             asyncio.create_task(delete_messages_after_delay(message, bot_message, 300))
         else:
@@ -275,7 +270,7 @@ async def summary_stats_command(
 💡 使用 `/summary` 命令手动生成总结
         """
 
-        await message.reply_text(stats_text.strip(), parse_mode="MarkdownV2")
+        await reply_markdown(message, stats_text.strip())
 
         logger.info(f"用户 {user.id} 查看了群聊 {chat.id} 的统计信息")
 

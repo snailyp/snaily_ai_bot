@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.services.ai_services import ai_services
-from bot.utils.helpers import safe_send_photo
+from bot.utils.helpers import reply_markdown, safe_send_photo
 from config.settings import config_manager
 
 
@@ -34,7 +34,8 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         # 获取绘画描述
         if not context.args:
-            await message.reply_text(
+            await reply_markdown(
+                message,
                 "请在命令后输入您想要绘制的图片描述。\n\n"
                 "例如：`/draw 一只可爱的小猫在花园里玩耍`\n\n"
                 "💡 **绘画提示：**\n"
@@ -42,7 +43,6 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 "• 可以包含风格、颜色、场景等信息\n"
                 "• 支持中英文描述\n"
                 "• 请避免不当内容",
-                parse_mode="MarkdownV2",
             )
             return
 
@@ -147,7 +147,7 @@ async def draw_help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 开始创作您的专属 AI 艺术作品吧！🎭
         """
 
-        await message.reply_text(help_text, parse_mode="MarkdownV2")
+        await reply_markdown(message, help_text.strip())
 
         logger.info(f"用户 {user.id} 查看了绘画帮助")
 

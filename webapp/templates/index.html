@@ -22,11 +22,12 @@
                 <div class="ai-editor-heading"><span class="tiny-label">EDITING / 仅编辑，不切换默认用途</span><button class="btn btn-quiet danger-text" type="button" id="remove-{{ kind }}-{{ collection }}">删除{{ '服务商' if collection == 'provider' else '模型' }}</button></div>
                 {% if collection == 'provider' %}
                 <div class="form-grid">{{ field(kind ~ '-provider-name', '服务商名称', placeholder='例如：我的 API 服务') }}
-                    {% if kind == 'drawing' %}<div class="field"><label for="drawing-provider-type">图像协议</label><select id="drawing-provider-type"><option value="openai_images">OpenAI Images</option><option value="gemini">Google Gemini</option><option value="seedream">火山方舟 · Seedream</option></select></div>{% else %}{{ field('text-provider-timeout', '请求超时 / 秒', 'number', min='0.001') }}{% endif %}
+                    {% if kind == 'drawing' %}<div class="field"><label for="drawing-provider-type">图像协议</label><select id="drawing-provider-type"><option value="openai_images">OpenAI Images</option><option value="gemini">Google Gemini</option><option value="seedream">火山方舟 · Seedream</option></select></div>{% elif kind == 'search' %}<div class="field"><label for="search-provider-type">搜索服务类型</label><select id="search-provider-type"><option value="exa">Exa</option><option value="tavily">Tavily</option><option value="firecrawl">Firecrawl</option></select></div>{% else %}{{ field('text-provider-timeout', '请求超时 / 秒', 'number', min='0.001') }}{% endif %}
                 </div>
                 <div class="field"><label for="{{ kind }}-provider-url">Base URL</label><input type="url" id="{{ kind }}-provider-url" spellcheck="false" placeholder="https://api.openai.com/v1" aria-describedby="{{ kind }}-provider-url-hint"><small id="{{ kind }}-provider-url-hint">使用服务商的 API 根地址，支持兼容接口。</small><button class="ai-inline-action" type="button" id="{{ kind }}-provider-use-url">填入推荐地址</button></div>
                 <div class="field"><label for="{{ kind }}-provider-key">API Key <span class="ai-secret-status" id="{{ kind }}-provider-key-status"></span></label><input type="password" id="{{ kind }}-provider-key" autocomplete="new-password" spellcheck="false" placeholder="输入密钥" aria-describedby="{{ kind }}-provider-key-hint"><small id="{{ kind }}-provider-key-hint">留空保留已保存的密钥。仅在你明确勾选下方选项时删除。</small><label class="ai-check"><input type="checkbox" id="{{ kind }}-provider-clear-key">清除已保存的 API Key</label></div>
-                {% if kind == 'drawing' %}{{ field('drawing-provider-timeout', '请求超时 / 秒', 'number', min='0.001') }}{% endif %}
+                {% if kind in ('drawing', 'search') %}{{ field(kind ~ '-provider-timeout', '请求超时 / 秒', 'number', min='0.001') }}{% endif %}
+                {% if kind == 'search' %}{{ switch('search-provider-enabled', '启用这个搜索服务', '关闭后保留配置，但不会被调用，也不会作为备用。') }}{% endif %}
                 <details class="ai-details"><summary>自定义请求头 <span>可选 · 值按密钥保存</span></summary><div id="{{ kind }}-provider-headers"></div></details>
                 {% else %}
                 <div class="form-grid">{{ field(kind ~ '-model-name', '配置名称', placeholder='例如：日常对话 / 高质量创作') }}<div class="field"><label for="{{ kind }}-model-provider">关联服务商</label><select id="{{ kind }}-model-provider"></select><small>只使用这个服务商的连接和密钥。</small></div></div>
@@ -110,7 +111,7 @@
                 </div>
             </section>
             <div class="ai-tabs" role="tablist" aria-label="AI 设置分类">
-                {% for id, name, index in [('providers','文本服务商','01'),('models','文本模型','02'),('drawing','图像生成','03'),('mcp','MCP 工具','04'),('preferences','对话偏好','05')] %}<button type="button" role="tab" class="ai-tab" id="ai-tab-{{ id }}" aria-controls="ai-pane-{{ id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}" data-ai-tab="{{ id }}"><span>{{ index }}</span>{{ name }}</button>{% endfor %}
+                {% for id, name, index in [('providers','文本服务商','01'),('models','文本模型','02'),('drawing','图像生成','03'),('mcp','MCP 工具','04'),('search','联网搜索','05'),('preferences','对话偏好','06')] %}<button type="button" role="tab" class="ai-tab" id="ai-tab-{{ id }}" aria-controls="ai-pane-{{ id }}" aria-selected="{{ 'true' if loop.first else 'false' }}" tabindex="{{ '0' if loop.first else '-1' }}" data-ai-tab="{{ id }}"><span>{{ index }}</span>{{ name }}</button>{% endfor %}
             </div>
             <div class="ai-pane" role="tabpanel" id="ai-pane-providers" aria-labelledby="ai-tab-providers">{{ ai_collection('text', 'provider', '文本服务商', 'CONNECTION LIBRARY') }}</div>
             <div class="ai-pane" role="tabpanel" id="ai-pane-models" aria-labelledby="ai-tab-models" hidden>{{ ai_collection('text', 'model', '文本模型', 'TEXT MODEL LIBRARY') }}</div>
@@ -142,6 +143,16 @@
                         </div>
                     </div>
                 </section>
+            </div>
+            <div class="ai-pane" role="tabpanel" id="ai-pane-search" aria-labelledby="ai-tab-search" hidden>
+                <section class="panel"><div class="panel-heading"><div><p class="eyebrow">WEB SEARCH / 联网搜索</p><h2>让回答，有据可查。</h2></div><span class="subtle-badge" id="search-draft-state">未配置</span></div>
+                    <p class="panel-description">/search 先用首选服务检索网页，再由任务模型整理答案并附上来源。没有可用服务时，退回 AI 知识库回答并明确提示。</p>
+                    {{ switch('search-enabled','调用外部搜索服务','关闭后 /search 只使用 AI 知识库。命令本身的开关在「系统概览」。') }}
+                    {{ switch('search-summarize','用任务模型整理结果','开启后生成带 [编号] 引用的答案；关闭时只列出搜索结果与摘要。') }}
+                    {{ switch('search-fallback','失败时自动切换服务','首选服务出错或没有结果时，依次尝试其他已启用的服务。') }}
+                    <div class="form-grid"><div class="field"><label for="search-active-provider">首选搜索服务</label><select id="search-active-provider"></select><small>留空时使用列表中第一个可用服务。</small></div>{{ field('search-max-results','返回结果数','number','每次搜索的结果条数，1–20。',min='1',max='20') }}</div>
+                </section>
+                {{ ai_collection('search', 'provider', '搜索服务', 'SEARCH PROVIDERS') }}
             </div>
             <div class="ai-pane" role="tabpanel" id="ai-pane-preferences" aria-labelledby="ai-tab-preferences" hidden><section class="panel narrow-panel"><div class="panel-heading"><div><p class="eyebrow">CONVERSATION & MEMORY</p><h2>让对话，保持熟悉的节奏。</h2></div>{{ icon('chat') }}</div>{{ switch('chat-history-enabled','记住对话上下文','关闭后使用一问一答模式。') }}{{ field('chat-history-max-length','保留对话轮数','number','1 轮 = 1 问 1 答，建议 5–20 轮。',min='1',value='10') }}{{ switch('chat-auto-reply-private','私聊自动回复','自动回复收到的私聊消息。') }}{{ field('chat-short-message-threshold','短消息阈值','number','短于此字符数的消息被视为短消息。',min='1',value='1024') }}<div class="editorial-note"><p>温度、Token 上限等请求参数在「文本模型」内单独设置；历史清理策略仍在 <a href="#history-config">历史记录</a> 管理。</p></div></section></div>
             <div class="ai-validation" id="ai-validation" role="alert" hidden></div>

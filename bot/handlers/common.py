@@ -12,7 +12,7 @@ from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from config.ai_config import resolve_image_model, resolve_text_model
-from bot.utils.helpers import safe_send_message
+from bot.utils.helpers import reply_markdown
 from config.settings import config_manager
 
 
@@ -72,7 +72,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 我是一个可爱、稳重的AI助手，像小蜗牛一样踏实可靠，致力于为您提供最好的服务体验！🐌
         """
 
-        bot_message = await message.reply_text(welcome_text, parse_mode="MarkdownV2")
+        # 文本为普通 Markdown，发送前统一转换为 MarkdownV2（否则 - . 等字符会导致解析失败）。
+        bot_message = await reply_markdown(message, welcome_text.strip())
 
         # 启动消息自动删除任务
         asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
@@ -160,7 +161,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 需要更多帮助？请联系管理员或查看项目文档。
         """
 
-        bot_message = await message.reply_text(help_text, parse_mode="MarkdownV2")
+        bot_message = await reply_markdown(message, help_text.strip())
 
         # 启动消息自动删除任务
         asyncio.create_task(delete_messages_after_delay(message, bot_message, 60))
@@ -226,7 +227,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"\n⏰ **查询时间：** {message.date.strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        await safe_send_message(message, status_text, parse_mode="MarkdownV2")
+        await reply_markdown(message, status_text)
 
         logger.info(f"用户 {user.id} ({user.username}) 执行了 /status 命令")
 
@@ -286,7 +287,7 @@ async def list_models_command(
         models_text += f"\n💡 当前使用模型: **{current_model}**"
         models_text += "\n\n使用 `/switch_model <模型名称>` 来切换模型。"
 
-        await safe_send_message(message, models_text, parse_mode="MarkdownV2")
+        await reply_markdown(message, models_text)
 
         logger.info(f"管理员 {user.id} ({user.username}) 查看了模型列表")
 

@@ -110,7 +110,7 @@ python -m webapp.app  # 仅启动 Web 控制面板
 - `/chat <消息>` - 与 AI 进行对话
 - `/draw <描述>` - 生成 AI 图片
 - `/draw_help` - 查看绘画帮助和技巧
-- `/search <关键词>` - 联网搜索信息
+- `/search <关键词>` - 联网搜索信息（支持 Exa、Tavily、Firecrawl，配置方法见 [AI 配置指南](docs/ai-configuration.md#联网搜索exatavilyfirecrawl)）
 
 ### 群组功能命令
 

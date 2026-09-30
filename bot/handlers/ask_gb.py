@@ -3,6 +3,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.services.ai_services import get_rag_answer
+from bot.utils.helpers import reply_markdown_long
 
 
 async def ask_gb_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -28,5 +29,5 @@ async def ask_gb_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # 删除"正在思考中"消息
     await thinking_message.delete()
 
-    # 发送最终答案
-    await update.message.reply_text(rag_answer, parse_mode="MarkdownV2")
+    # 发送最终答案（普通 Markdown，发送前统一转换一次）
+    await reply_markdown_long(update.message, rag_answer)
