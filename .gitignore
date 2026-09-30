@@ -36,6 +36,9 @@ config/config.json
 *.swp
 *.swo
 
+# Claude Code
+.claude/
+
 # Logs
 *.log
 logs/
