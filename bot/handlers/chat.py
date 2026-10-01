@@ -87,8 +87,13 @@ async def _chat_turn(update, text, *, media=None, version):
         if not response and not reply.images:
             raise ValueError("empty response")
         if history_enabled:
+            history_response = response or "已生成图片。"
+            # Photo delivery must not discard the source URLs needed by later MCP edits.
+            image_references = [f"{index}. {image.url}" for index, image in enumerate(reply.images, 1) if image.url]
+            if image_references:
+                history_response += "\n\n[本次生成图片的原始 URL，后续修改使用对应链接]\n" + "\n".join(image_references)
             message_store.add_dialog_message(chat_id, user_message)
-            message_store.add_dialog_message(chat_id, {"role": "assistant", "content": response or "已生成图片。"})
+            message_store.add_dialog_message(chat_id, {"role": "assistant", "content": history_response})
             message_store.release_media(media or [], keep=True)
         with suppress(Exception):
             await thinking.delete()

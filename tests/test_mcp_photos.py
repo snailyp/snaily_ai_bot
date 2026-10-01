@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from test_ai_services import service_module
 from test_ai_api import make_manager
-from test_mcp_client import FakeConnections, config, server
+from test_mcp_client import FakeConnections, config, server, tool
 from test_text_generation import FakeClient, chat as model_chat, tool_call
 
 _settings = ModuleType('config.settings')
@@ -119,10 +119,14 @@ class MCPPhotoConversationTests(unittest.IsolatedAsyncioTestCase):
         self.manager.config['ai_services']['text']['models'][0]['supports_tools'] = True
         self.manager.config['ai_services']['mcp'] = config(server())
         self.fake = FakeConnections()
+        self.fake.pages['one'] = [{'tools': [tool(), tool(name='edit', inputSchema={
+            'type': 'object', 'properties': {'image_url': {'type': 'string'}}, 'required': ['image_url'],
+        })]}]
         self.mcp = MCPClientManager(lambda: self.manager.get_ai_config()['mcp'], lambda uid: True,
                                     connection_factory=self.fake)
         self.addAsyncCleanup(self.mcp.aclose)
-        self.name = (await self.mcp.list_tools(1, 1))[0]['name']
+        tools = await self.mcp.list_tools(1, 1)
+        self.name, self.edit_name = tools[0]['name'], tools[1]['name']
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
         self.store = MessageStore(self.folder.name)
@@ -155,6 +159,46 @@ class MCPPhotoConversationTests(unittest.IsolatedAsyncioTestCase):
             update.effective_message.reply_photo.assert_awaited_once()
             self.assertEqual(update.effective_message.reply_photo.call_args.kwargs['photo'], URL)
             thinking.edit_text.assert_not_awaited()
+
+    async def test_followup_edit_receives_original_urls_without_model_echo(self):
+        urls = [URL + '!', URL.replace('drawing', 'second')]
+        for protocol in ('chat_completions', 'responses'):
+            for final in ('画好了', ''):
+                with self.subTest(protocol=protocol, final=final):
+                    self.store.clear_dialog_history(1)
+                    service, _ = self.service({'structuredContent': {'images': urls}}, final=final, protocol=protocol)
+                    update, _ = self.update()
+                    await self.turn(service, update)
+                    self.assertEqual(update.effective_message.reply_photo.await_count, 2)
+                    # Reload from disk: references must survive a service restart as well.
+                    self.store = MessageStore(self.folder.name)
+                    seen_urls = []
+                    class EditClient(FakeClient):
+                        async def create(client, **kwargs):
+                            if not client.calls:
+                                messages = kwargs.get('messages', kwargs.get('input'))
+                                previous = [item['content'] for item in messages if item.get('role') == 'assistant']
+                                for url in urls:
+                                    self.assertTrue(any(url in text for text in previous), 'Original image URL missing from follow-up model context')
+                                seen_urls.extend(urls)
+                            return await super().create(**kwargs)
+                    if protocol == 'responses':
+                        responses = [NS(output=[{'type': 'function_call', 'call_id': 'edit_1', 'name': self.edit_name,
+                                                 'arguments': json.dumps({'image_url': urls[1]})}]),
+                                     NS(output=[{'type': 'message', 'content': [{'type': 'output_text', 'text': '修改好了'}]}])]
+                    else:
+                        responses = [model_chat(None, [tool_call(self.edit_name, json.dumps({'image_url': urls[1]}))]), model_chat('修改好了')]
+                    client = EditClient(responses)
+                    service.text_generator = TextGenerator(client.factory)
+                    self.fake.results['one'] = {'content': [{'type': 'text', 'text': '修改完成'}]}
+                    with patch.object(chat, 'message_store', self.store), patch.object(chat, 'config_manager', self.manager), patch.object(chat, 'ai_services', service):
+                        await chat._chat_with_ai(update, '把第二张图的背景改成蓝色')
+                    self.assertEqual(seen_urls, urls)
+                    self.assertEqual(self.fake.sessions[0].calls[-1][0], 'edit')
+                    self.assertEqual(self.fake.sessions[0].calls[-1][1], {'image_url': urls[1]})
+                    self.assertEqual(self.store.get_dialog_history(2), [])
+                    self.store.clear_dialog_history(1)
+                    self.assertEqual(self.store.get_dialog_history(1), [])
 
     async def test_inline_image_with_no_final_text_is_sent_and_not_in_history(self):
         for protocol in ('chat_completions', 'responses'):
