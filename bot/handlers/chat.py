@@ -6,7 +6,7 @@ import asyncio
 from contextlib import suppress
 
 from loguru import logger
-from telegram import Update
+from telegram import LinkPreviewOptions, Update
 from telegram.ext import ContextTypes
 
 from bot.handlers.common import delete_messages_after_delay
@@ -16,14 +16,14 @@ from bot.utils.helpers import reply_markdown, reply_markdown_long, safe_send_pho
 from config.settings import config_manager
 
 
-async def _send_long_message(update: Update, message: str) -> None:
+async def _send_long_message(update: Update, message: str, **kwargs) -> None:
     """分段发送普通 Markdown 文本；转换为 MarkdownV2 只在发送时进行一次。"""
     if not update.effective_message:
         logger.warning(
             "_send_long_message received an update without an effective_message."
         )
         return
-    await reply_markdown_long(update.effective_message, message)
+    await reply_markdown_long(update.effective_message, message, **kwargs)
 
 
 async def _send_reply_images(update, images, version):
@@ -101,7 +101,9 @@ async def _chat_turn(update, text, *, media=None, version):
         if version != message_store.version(chat_id):
             return
         if response:
-            await _send_long_message(update, response)
+            # The photo is sent separately; keep its URL without a duplicate link preview.
+            options = {"link_preview_options": LinkPreviewOptions(is_disabled=True)} if reply.images else {}
+            await _send_long_message(update, response, **options)
         await _send_reply_images(update, reply.images, version)
         if response and message_store.chat_setting(chat_id, "voice"):
             from bot.handlers.media import send_voice_reply

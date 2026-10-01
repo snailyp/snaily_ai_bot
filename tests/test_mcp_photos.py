@@ -160,6 +160,39 @@ class MCPPhotoConversationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(update.effective_message.reply_photo.call_args.kwargs['photo'], URL)
             thinking.edit_text.assert_not_awaited()
 
+    async def test_photo_reply_disables_duplicate_link_previews_in_all_text_chunks(self):
+        for protocol in ('chat_completions', 'responses'):
+            for link in (f'![戴墨镜的小狗]({URL})', f'[戴墨镜的小狗]({URL})', URL):
+                with self.subTest(protocol=protocol, link=link):
+                    text = '小狗戴上墨镜了。\n' * 400 + link
+                    service, _ = self.service({'structuredContent': {'image_url': URL}}, final=text, protocol=protocol)
+                    update, _ = self.update()
+                    await self.turn(service, update)
+                    calls = update.effective_message.reply_text.call_args_list[1:]
+                    self.assertGreater(len(calls), 1)
+                    for call in calls:
+                        options = call.kwargs.get('link_preview_options')
+                        self.assertIsNotNone(options, 'Photo reply must disable automatic link previews')
+                        self.assertTrue(options.is_disabled)
+                    update.effective_message.reply_photo.assert_awaited_once()
+                    self.assertIn(URL, self.store.get_dialog_history(1)[-1]['content'])
+
+    async def test_photo_reply_plain_text_fallback_also_disables_previews(self):
+        from telegram.error import BadRequest
+        service, _ = self.service({'structuredContent': {'image_url': URL}}, final=f'[绘图]({URL})')
+        update, thinking = self.update()
+        async def reply_text(*args, **kwargs):
+            if kwargs.get('parse_mode') == 'MarkdownV2':
+                raise BadRequest("Can't parse entities: fixture")
+            return thinking
+        update.effective_message.reply_text.side_effect = reply_text
+        await self.turn(service, update)
+        calls = update.effective_message.reply_text.call_args_list[1:]
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertTrue(call.kwargs['link_preview_options'].is_disabled)
+        update.effective_message.reply_photo.assert_awaited_once()
+
     async def test_followup_edit_receives_original_urls_without_model_echo(self):
         urls = [URL + '!', URL.replace('drawing', 'second')]
         for protocol in ('chat_completions', 'responses'):
@@ -211,10 +244,12 @@ class MCPPhotoConversationTests(unittest.IsolatedAsyncioTestCase):
             thinking.edit_text.assert_not_awaited()
 
     async def test_plain_links_remain_text_only(self):
-        service, _ = self.service({'content': [{'type': 'text', 'text': 'https://example.invalid/page'}]})
+        service, _ = self.service({'content': [{'type': 'text', 'text': 'https://example.invalid/page'}]},
+                                  final='[网页](https://example.invalid/page)')
         update, _ = self.update()
         await self.turn(service, update)
         update.effective_message.reply_photo.assert_not_awaited()
+        self.assertNotIn('link_preview_options', update.effective_message.reply_text.call_args.kwargs)
 
     async def test_failed_photo_keeps_link_and_does_not_block_next_image(self):
         second = URL.replace('drawing', 'second')
