@@ -178,6 +178,8 @@ class TextGenerator:
         tools: Optional[list[dict]] = None,
         tool_caller: Optional[Callable[[str, dict], Awaitable[str]]] = None,
         limits: Optional[dict] = None,
+        *,
+        allow_empty_text: Optional[Callable[[], bool]] = None,
     ) -> str:
         limits = limits or {}
         tools = tools if model.get("supports_tools") and tool_caller else []
@@ -232,6 +234,10 @@ class TextGenerator:
                             else:
                                 raise
                         output = _responses_output(response)
+                        normal_finish = not any(
+                            part.get("type") == "refusal" for item in output
+                            if item.get("type") == "message" for part in item.get("content", [])
+                        )
                         calls = [item for item in output if item.get("type") == "function_call"]
                         text = "\n".join(
                             part.get("text", "") for item in output if item.get("type") == "message"
@@ -251,6 +257,7 @@ class TextGenerator:
                         if not response.choices:
                             raise TextGenerationError("模型未返回任何回复。")
                         message = _as_dict(response.choices[0].message)
+                        normal_finish = not message.get("refusal") and getattr(response.choices[0], "finish_reason", "stop") == "stop"
                         text = (message.get("content") or "").strip()
                         calls = [
                             {"name": call["function"]["name"], "arguments": call["function"]["arguments"], "call_id": call["id"]}
@@ -259,7 +266,7 @@ class TextGenerator:
                         state.append({key: message[key] for key in ("role", "content", "tool_calls") if key in message})
 
                     if not calls:
-                        if not text:
+                        if not text and not (normal_finish and allow_empty_text and allow_empty_text()):
                             raise TextGenerationError("模型未返回文本，可能拒绝了请求或输出额度不足。")
                         return text
                     if not tools_by_name or tool_caller is None:

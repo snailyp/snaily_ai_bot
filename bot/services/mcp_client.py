@@ -21,6 +21,15 @@ import re
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
+from bot.services.image_generation import ImageResult
+from bot.services.mcp_images import prepare_image_result
+
+
+@dataclass(frozen=True)
+class MCPToolResult:
+    text: str
+    images: tuple[ImageResult, ...] = ()
+
 
 MAX_TOOLS = 128
 MAX_TOOL_PAGES = 32
@@ -530,6 +539,20 @@ class MCPClientManager:
             return deepcopy(result)
 
     async def call_tool(self, name, arguments, user_id, chat_id=None) -> str:
+        result = await self._call_tool(name, arguments, user_id, chat_id)
+        limit = _limit(self._config().get("max_result_chars", MAX_RESULT_CHARS), MAX_RESULT_CHARS, 100000)
+        return _result_text(result, limit)
+
+    async def call_tool_result(self, name, arguments, user_id, chat_id=None) -> MCPToolResult:
+        result = await self._call_tool(name, arguments, user_id, chat_id)
+        sanitized, images = prepare_image_result(result)
+        limit = _limit(self._config().get("max_result_chars", MAX_RESULT_CHARS), MAX_RESULT_CHARS, 100000)
+        text = _result_text(sanitized, limit)
+        if images:
+            text = _truncate("[MCP images attached for delivery to the user]\n" + text, limit)
+        return MCPToolResult(text, tuple(images))
+
+    async def _call_tool(self, name, arguments, user_id, chat_id=None):
         initial = self._config()
         if not await self._authorized(initial, user_id, chat_id):
             if initial.get("enabled") is not True:
@@ -557,9 +580,7 @@ class MCPClientManager:
 
         # The owner serializes its own queue. Release the registry lock so config
         # reconciliation can cancel this call and other servers can keep responding.
-        result = await worker.request("call", (original, deepcopy(arguments)), guard)
-        limit = _limit(self._config().get("max_result_chars", MAX_RESULT_CHARS), MAX_RESULT_CHARS, 100000)
-        return _result_text(result, limit)
+        return await worker.request("call", (original, deepcopy(arguments)), guard)
 
     def status(self) -> dict:
         """Safe synchronous snapshot: no URLs, commands, env, headers or raw errors."""

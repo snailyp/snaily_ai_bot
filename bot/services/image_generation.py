@@ -41,7 +41,7 @@ class ImageResult:
     filename: str = "generated.png"
 
 
-def _http_url(value: object) -> str:
+def validate_http_url(value: object) -> str:
     if not isinstance(value, str) or any(ord(c) < 33 for c in value):
         raise ImageGenerationError("Image service returned an invalid URL.")
     try:
@@ -82,7 +82,7 @@ def _mime_from_bytes(data: bytes) -> Optional[str]:
     return None
 
 
-def _inline_image(encoded: object, mime: Optional[str] = None) -> ImageResult:
+def decode_image(encoded: object, mime: Optional[str] = None) -> ImageResult:
     if not isinstance(encoded, str) or not encoded or len(encoded) > 4 * ((MAX_IMAGE_BYTES + 2) // 3):
         raise ImageGenerationError("Image service returned empty or oversized image data.")
     try:
@@ -99,8 +99,8 @@ def _inline_image(encoded: object, mime: Optional[str] = None) -> ImageResult:
     return ImageResult(data=data, mime_type=actual_mime, filename="generated." + _EXTENSIONS[actual_mime])
 
 
-def _url_image(url: object, output_format: object = None) -> ImageResult:
-    url = _http_url(url)
+def image_from_url(url: object, output_format: object = None) -> ImageResult:
+    url = validate_http_url(url)
     extension = urlsplit(url).path.rsplit(".", 1)[-1].lower()
     mime = _FORMATS.get(extension) or _FORMATS.get(str(output_format).lower(), "image/png")
     return ImageResult(url=url, mime_type=mime, filename="generated." + _EXTENSIONS[mime])
@@ -135,7 +135,7 @@ class ImageGenerator:
             "gemini": "https://generativelanguage.googleapis.com/v1beta",
             "seedream": "https://ark.cn-beijing.volces.com/api/v3",
         }
-        base = _http_url(provider.get("api_base_url") or defaults[kind]).rstrip("/")
+        base = validate_http_url(provider.get("api_base_url") or defaults[kind]).rstrip("/")
         if urlsplit(base).query or urlsplit(base).fragment:
             raise ImageGenerationError("Image provider base URL cannot contain query parameters or fragments.")
         try:
@@ -217,7 +217,7 @@ class ImageGenerator:
                 for part in parts:
                     inline = part.get("inlineData") if isinstance(part, dict) else None
                     if isinstance(inline, dict):
-                        return _inline_image(inline.get("data"), inline.get("mimeType"))
+                        return decode_image(inline.get("data"), inline.get("mimeType"))
             raise ImageGenerationError("Image service returned no image; the request may have been refused.")
         images = body.get("data")
         if isinstance(images, list):
@@ -225,9 +225,9 @@ class ImageGenerator:
                 if not isinstance(item, dict):
                     continue
                 if item.get("b64_json"):
-                    return _inline_image(item["b64_json"])
+                    return decode_image(item["b64_json"])
                 if item.get("url"):
-                    return _url_image(item["url"], params.get("output_format"))
+                    return image_from_url(item["url"], params.get("output_format"))
         raise ImageGenerationError("Image service returned no image.")
 
     async def aclose(self) -> None:

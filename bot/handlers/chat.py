@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 from bot.handlers.common import delete_messages_after_delay
 from bot.services.ai_services import ai_services
 from bot.services.message_store import message_store
-from bot.utils.helpers import reply_markdown, reply_markdown_long
+from bot.utils.helpers import reply_markdown, reply_markdown_long, safe_send_photo
 from config.settings import config_manager
 
 
@@ -24,6 +24,30 @@ async def _send_long_message(update: Update, message: str) -> None:
         )
         return
     await reply_markdown_long(update.effective_message, message)
+
+
+async def _send_reply_images(update, images, version):
+    for image in images:
+        if version != message_store.version(update.effective_chat.id):
+            return
+        try:
+            options = {"filename": image.filename} if image.data else {}
+            await safe_send_photo(update.effective_message, image.data or image.url, parse_mode=None, **options)
+        except Exception as exc:
+            logger.warning(f"聊天图片发送失败: {type(exc).__name__}")
+            if version != message_store.version(update.effective_chat.id):
+                return
+            fallback = f"图片发送失败，可通过原链接查看：\n{image.url}" if image.url else "图片发送失败，请稍后重新尝试绘图。"
+            try:
+                if image.url and len(fallback.encode('utf-16-le')) // 2 > 4096:
+                    await update.effective_message.reply_document(
+                        document=image.url.encode('utf-8'), filename='image-link.txt',
+                        caption='图片发送失败，完整原链接见附件。', parse_mode=None,
+                    )
+                else:
+                    await update.effective_message.reply_text(fallback, parse_mode=None)
+            except Exception as fallback_exc:
+                logger.warning(f"聊天图片失败提示发送失败: {type(fallback_exc).__name__}")
 
 
 async def _chat_with_ai(update: Update, text: str, *, media=None, version=None) -> None:
@@ -42,6 +66,7 @@ async def _chat_turn(update, text, *, media=None, version):
     if version != message_store.version(chat_id):
         return
     thinking = await update.effective_message.reply_text("AI 正在思考中...")
+    thinking_deleted = False
     history_enabled = config_manager.get("features.chat.history_enabled", True)
     user_message = {"role": "user", "content": text}
     if media:
@@ -51,29 +76,37 @@ async def _chat_turn(update, text, *, media=None, version):
             chat_id, limit=config_manager.get("features.chat.history_max_length", 10)
         ) if history_enabled else []
         payload, vision = message_store.model_history(history + [user_message])
-        response = await asyncio.wait_for(ai_services.chat_completion(
+        reply = await asyncio.wait_for(ai_services.chat_reply(
             history=payload, user_id=update.effective_user.id, chat_id=chat_id,
             strict=True, vision=vision,
         ), timeout=300)
         if version != message_store.version(chat_id):
             await thinking.delete()
             return
-        if not response:
+        response = reply.text
+        if not response and not reply.images:
             raise ValueError("empty response")
         if history_enabled:
             message_store.add_dialog_message(chat_id, user_message)
-            message_store.add_dialog_message(chat_id, {"role": "assistant", "content": response})
+            message_store.add_dialog_message(chat_id, {"role": "assistant", "content": response or "已生成图片。"})
             message_store.release_media(media or [], keep=True)
         with suppress(Exception):
             await thinking.delete()
+            thinking_deleted = True
         if version != message_store.version(chat_id):
             return
-        await _send_long_message(update, response)
-        if message_store.chat_setting(chat_id, "voice"):
+        if response:
+            await _send_long_message(update, response)
+        await _send_reply_images(update, reply.images, version)
+        if response and message_store.chat_setting(chat_id, "voice"):
             from bot.handlers.media import send_voice_reply
             await send_voice_reply(update, response, version)
     except Exception:
-        await thinking.edit_text("抱歉，AI 服务暂时不可用，请检查模型配置或稍后重试。")
+        error = "抱歉，AI 服务暂时不可用，请检查模型配置或稍后重试。"
+        if thinking_deleted:
+            await update.effective_message.reply_text(error)
+        else:
+            await thinking.edit_text(error)
     finally:
         if not history_enabled or version != message_store.version(chat_id):
             message_store.release_media(media or [])

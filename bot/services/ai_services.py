@@ -5,6 +5,7 @@ AI 功能入口。模型连接、文本协议、绘图和 MCP 分别由独立模
 import os
 import re
 from datetime import datetime
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import openai
@@ -18,7 +19,14 @@ from bot.services import web_search
 from bot.services.speech import SpeechService
 from bot.services.image_generation import ImageGenerator, ImageResult
 from bot.services.mcp_client import MCPClientManager
+from bot.services.mcp_images import ImageAttachments
 from bot.services.text_generation import TextGenerationError, TextGenerator, client_options
+
+
+@dataclass(frozen=True)
+class ChatReply:
+    text: str
+    images: tuple[ImageResult, ...] = ()
 
 
 class AIServices:
@@ -54,6 +62,12 @@ class AIServices:
             logger.warning(f"获取模型列表失败: {type(exc).__name__}")
             return []
 
+    async def chat_reply(self, history, user_id=None, **kwargs) -> ChatReply:
+        """Chat-only attachments live for this request, never on the shared service."""
+        attachments = ImageAttachments()
+        text = await self.chat_completion(history=history, user_id=user_id, _attachments=attachments, **kwargs)
+        return ChatReply(text or "", tuple(attachments.images))
+
     async def chat_completion(
         self,
         history: List[Dict[str, Any]],
@@ -65,6 +79,7 @@ class AIServices:
         system_prompt: Optional[str] = None,
         strict: bool = False,
         vision: bool = False,
+        _attachments: Optional[ImageAttachments] = None,
     ) -> Optional[str]:
         try:
             ai_config = self.config_manager.get_ai_config()
@@ -79,15 +94,23 @@ class AIServices:
                 tools = await self.mcp.list_tools(user_id, chat_id)
 
             async def call_tool(name, arguments):
-                return await self.mcp.call_tool(name, arguments, user_id, chat_id)
+                if _attachments is None:
+                    return await self.mcp.call_tool(name, arguments, user_id, chat_id)
+                result = await self.mcp.call_tool_result(name, arguments, user_id, chat_id)
+                for image in result.images:
+                    _attachments.add(image)
+                return result.text
 
+            options = {} if _attachments is None else {"allow_empty_text": lambda: bool(_attachments.images)}
             reply = await self.text_generator.complete(
                 provider, model, messages, tools=tools, tool_caller=call_tool,
-                limits=ai_config.get("mcp", {}),
+                limits=ai_config.get("mcp", {}), **options,
             )
             logger.info(f"AI 生成完成 - 用途: {role}, 用户: {user_id}, 回复长度: {len(reply)}")
             return escape(reply) if enable_md2tg else reply
         except Exception as exc:
+            if _attachments is not None:
+                _attachments.images.clear()
             if strict:
                 raise TextGenerationError("AI 服务暂时不可用，请检查模型配置或稍后重试。") from None
             detail = f", 原因: {exc}" if isinstance(exc, TextGenerationError) else ""
