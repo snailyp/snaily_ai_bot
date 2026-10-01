@@ -1,0 +1,83 @@
+<section class="view push-workspace" id="admin-push" aria-label="管理员推送" hidden>
+    <div class="push-intro"><div><p class="eyebrow">EDITOR'S DESK / 管理员推送</p><h2>写好，再抵达<span>.</span></h2><p>从一个想法，到一条值得送达的消息。每一步，都由你确认。</p></div><span class="push-stamp" aria-hidden="true">SNAILY<br>POST</span></div>
+    <div class="push-toolbar">
+        <div class="push-tabs" role="tablist" aria-label="推送工作区">
+            <button type="button" role="tab" id="push-tab-compose" aria-controls="push-pane-compose" aria-selected="true" tabindex="0" data-push-tab="compose"><span>01</span>创作</button>
+            <button type="button" role="tab" id="push-tab-drafts" aria-controls="push-pane-drafts" aria-selected="false" tabindex="-1" data-push-tab="drafts"><span>02</span>草稿</button>
+            <button type="button" role="tab" id="push-tab-tasks" aria-controls="push-pane-tasks" aria-selected="false" tabindex="-1" data-push-tab="tasks"><span>03</span>任务记录</button>
+        </div>
+        <div class="push-toolbar-actions"><span id="push-ready" class="push-runtime" role="status">正在检查运行状态</span><button class="btn btn-quiet" type="button" id="push-refresh">刷新列表</button></div>
+    </div>
+    <div id="push-error" class="push-error" role="alert" hidden></div>
+    <div id="push-pane-compose" role="tabpanel" aria-labelledby="push-tab-compose">
+        <form id="push-compose-form" data-independent-state="true">
+            <div class="push-desk">
+                <div class="push-editor-column">
+                    <section class="panel push-manuscript">
+                        <div class="panel-heading"><div><p class="eyebrow">01 / MANUSCRIPT</p><h2>推送正文</h2></div><button class="btn btn-quiet" id="push-new" type="button">新建内容</button></div>
+                        <p id="push-source" class="push-source">未保存的新内容</p>
+                        <div class="field push-text-field"><label for="push-text">想对社群说些什么？<span id="push-text-count">0 字符</span></label><textarea id="push-text" rows="11" placeholder="写下正文，或先记下几条要点…" aria-describedby="push-text-hint"></textarea><small id="push-text-hint">支持常规 Markdown。最终格式与分段以右侧的服务端预览为准；也可以只发图片。</small></div>
+                        <div class="push-save-row"><span class="save-state" id="push-save-state" role="status">仅保留在当前页面，手动保存后成为草稿</span><button type="submit" class="btn btn-secondary" id="push-save">{{ icon('file') }}保存草稿</button></div>
+                    </section>
+                    <section class="panel push-assistant">
+                        <div class="panel-heading"><div><p class="eyebrow">02 / WRITING COMPANION</p><h2>让表达，更合适。</h2></div>{{ icon('spark') }}</div>
+                        <div class="form-grid">
+                            <div class="field"><label for="push-tone">表达口吻</label><select id="push-tone"><option value="natural">自然日常</option><option value="formal">正式通知</option><option value="friendly">亲切友好</option><option value="humorous">幽默俏皮</option><option value="concise">简洁直白</option></select></div>
+                            <div class="field"><label for="push-length">期望篇幅</label><select id="push-length"><option value="short">简短</option><option value="medium" selected>适中</option><option value="long">详细</option></select></div>
+                        </div>
+                        <div class="field"><label for="push-custom">自定义表达要求 <span>可选</span></label><input id="push-custom" placeholder="例如：少用感叹号，保留原文中的日期"></div>
+                        <div class="field"><label for="push-material">扩写补充素材 <span>可选</span></label><textarea id="push-material" rows="3" placeholder="补充已确认的背景、事实或行动指引…"></textarea><small>润色保留原意；扩写只依据已提供的素材，不应编造事实或承诺。</small></div>
+                        <div class="push-actions"><button class="btn btn-secondary" id="push-polish" data-push-operation="polish" type="button">润色文案</button><button class="btn btn-secondary" id="push-expand" data-push-operation="expand" type="button">扩写文案</button></div>
+                        <div class="push-operation-status" id="push-operation-status" role="status" aria-live="polite" hidden></div>
+                        <section class="push-candidate" id="push-text-candidate" aria-label="文案候选" hidden><div class="push-candidate-heading"><span class="eyebrow" id="push-candidate-label">候选内容 / 尚未采用</span><button class="btn btn-quiet" id="push-dismiss-text" type="button">舍弃</button></div><pre id="push-candidate-text"></pre><button class="btn btn-primary" id="push-adopt-text" type="button">采用为正文</button><small>采用后才会替换正文，不会自动发布。</small></section>
+                    </section>
+                    <section class="panel push-images">
+                        <div class="panel-heading"><div><p class="eyebrow">03 / PICTURE EDITOR</p><h2>推送配图</h2></div><span class="subtle-badge" id="push-image-count">0 / 4 张</span></div>
+                        <p class="panel-description">上传与生成可混用。按这里的顺序发送，最多 4 张。</p>
+                        <div class="push-image-list" id="push-image-list" aria-label="已选配图"></div>
+                        <div class="push-image-empty" id="push-image-empty">让一张图片，补上文字之外的表达。</div>
+                        <div class="push-upload-row"><button class="btn btn-secondary" id="push-upload" type="button">{{ icon('image') }}上传图片</button><small>JPEG / PNG / 静态 WebP · 单张不超过 10 MB</small></div>
+                        <input type="file" id="push-file" accept="image/jpeg,image/png,image/webp" hidden aria-label="选择上传的图片">
+                        <div class="push-drawing">
+                            <div class="field"><label for="push-image-prompt">绘图描述</label><textarea id="push-image-prompt" rows="3" placeholder="描述画面主体、构图、色彩和风格…"></textarea></div>
+                            <div class="push-actions"><button class="btn btn-secondary" id="push-image-prompt-create" data-push-operation="image_prompt" type="button">从正文构思描述</button><button class="btn btn-secondary" id="push-image-create" data-push-operation="image" type="button">生成一张候选图</button></div>
+                            <small class="push-ai-note">创作会调用已配置的模型。构思描述不会自动绘图，候选图也不会自动加入配图。</small>
+                            <section class="push-candidate" id="push-prompt-candidate" aria-label="绘图描述候选" hidden><div class="push-candidate-heading"><span class="eyebrow">绘图描述候选 / 尚未采用</span><button class="btn btn-quiet" id="push-dismiss-prompt" type="button">舍弃</button></div><pre id="push-candidate-prompt"></pre><button class="btn btn-primary" id="push-adopt-prompt" type="button">采用为绘图描述</button><small>采用后，请再手动点击「生成一张候选图」。</small></section>
+                            <section class="push-candidate" id="push-image-candidate" aria-label="图片候选" hidden><div class="push-candidate-heading"><span class="eyebrow">图片候选 / 尚未采用</span><button class="btn btn-quiet" id="push-dismiss-image" type="button">舍弃</button></div><div id="push-candidate-image"></div><div class="push-actions"><button class="btn btn-primary" id="push-adopt-image" type="button">加入配图</button><label class="sr-only" for="push-replace-candidate">候选图替换位置</label><select id="push-replace-candidate" aria-label="候选图替换位置"></select><button class="btn btn-secondary" id="push-adopt-replace" type="button">替换所选</button></div><small id="push-candidate-image-hint">满 4 张仍可生成候选，再选择一张替换。</small></section>
+                        </div>
+                        <p class="footnote">未保存的临时配图保留 24 小时。草稿与待发送任务会保留已引用配图。</p>
+                    </section>
+                </div>
+                <aside class="push-publish-column" aria-label="预览与发布">
+                    <section class="panel push-address">
+                        <div class="panel-heading"><div><p class="eyebrow">04 / DELIVERY ADDRESS</p><h2>把消息，送到哪里？</h2></div>{{ icon('broadcast') }}</div>
+                        <div class="field"><label for="push-targets">正式收件目标</label><textarea id="push-targets" rows="2" placeholder="@your_channel, -100123456789" aria-describedby="push-targets-hint"></textarea><small id="push-targets-hint">明确填写私聊、群或频道 ID，多个用英文逗号分隔。不会自动使用热点推送目标。</small><button class="ai-inline-action" id="push-import-targets" type="button">导入已保存的热点推送目标</button></div>
+                        <div class="field"><label for="push-delivery-mode">发送安排</label><select id="push-delivery-mode"><option value="now">确认后立即发送</option><option value="scheduled">指定一次发送时间</option></select></div>
+                        <div class="field" id="push-schedule-field" hidden><label for="push-scheduled-at">北京时间 · Asia/Shanghai</label><input type="datetime-local" id="push-scheduled-at" aria-describedby="push-schedule-hint"><small id="push-schedule-hint">按北京时间解释，不随浏览器时区转换。服务恢复时延误不超过 30 分钟会补发，超过则标为已错过。</small></div>
+                        <button class="btn btn-secondary push-wide" type="button" id="push-preview">生成正式预览 {{ icon('arrow') }}</button>
+                    </section>
+                    <section class="push-proof" aria-label="正式发送预览">
+                        <div class="push-proof-heading"><p class="eyebrow">FINAL PROOF / 正式发送预览</p><span id="push-preview-state">尚未生成</span></div>
+                        <div id="push-preview-empty" class="push-proof-empty"><span aria-hidden="true">Aa.</span><p>先预览，再确认。</p><small>这里展示实际发送的正文、图片与消息分段。修改内容、顺序、目标或时间后，需要重新预览。</small></div>
+                        <div id="push-preview-content" hidden><div class="push-preview-meta" id="push-preview-meta"></div><div id="push-preview-plan" class="push-plan"></div></div>
+                        <button class="btn btn-primary push-wide" id="push-confirm" type="button" disabled>确认正式发布</button>
+                        <small class="push-confirm-note">确认表示任务已被持久接受，不代表已经送达。已保存草稿将转为任务。</small>
+                    </section>
+                    <section class="panel push-test">
+                        <p class="eyebrow">A SEPARATE CHECK / 独立试发</p><h2>先给自己看一眼。</h2>
+                        <p class="panel-description">使用当前内容，单独发送到一个测试目标。不消耗正式预览，也不改变正式目标与时间。</p>
+                        <div class="field"><label for="push-test-target">单个测试目标</label><input id="push-test-target" placeholder="例如：你的 Telegram 用户 ID"></div>
+                        <button class="btn btn-secondary push-wide" id="push-test-preview" type="button">预览试发</button>
+                        <div id="push-test-content" hidden><div class="push-preview-meta" id="push-test-meta"></div><div class="push-plan" id="push-test-plan"></div><button class="btn btn-secondary push-wide" id="push-test-confirm" type="button" disabled>确认仅向测试目标发送</button></div>
+                    </section>
+                </aside>
+            </div>
+        </form>
+    </div>
+    <div id="push-pane-drafts" role="tabpanel" aria-labelledby="push-tab-drafts" hidden>
+        <section class="panel"><div class="panel-heading"><div><p class="eyebrow">SAVED MANUSCRIPTS</p><h2>留给下一次灵感。</h2></div><button class="btn btn-secondary" id="push-draft-new" type="button">新建内容</button></div><p class="panel-description">只有手动保存的内容会出现在这里。正式发布后，草稿转为任务；试发不影响草稿。</p><div id="push-draft-list" class="push-record-list" aria-live="polite"></div></section>
+    </div>
+    <div id="push-pane-tasks" role="tabpanel" aria-labelledby="push-tab-tasks" hidden>
+        <div class="push-records-layout"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">DELIVERY LEDGER</p><h2>每一次送达，都有记录。</h2></div></div><p class="panel-description">终态任务与无其他引用的配图保留 3 天。结果不明不等于失败，不会重发。</p><div id="push-task-list" class="push-record-list" aria-live="polite"></div></section><section class="panel push-task-detail" aria-label="任务详情"><div id="push-task-empty" class="push-record-empty">选择一个任务，查看逐目标、逐部分的投递结果。</div><div id="push-task-content" hidden></div></section></div>
+    </div>
+</section>

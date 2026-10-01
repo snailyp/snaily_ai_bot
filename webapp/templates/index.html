@@ -78,6 +78,7 @@
         <p class="nav-caption">工作空间 / WORKSPACE</p>
         <a class="nav-link active" href="#overview" data-view="overview">{{ icon('grid') }}系统概览<span class="nav-index">01</span></a>
         <a class="nav-link" href="#ai-config" data-view="ai-config">{{ icon('spark') }}AI 配置<span class="nav-index">02</span></a>
+        <a class="nav-link" href="#admin-push" data-view="admin-push">{{ icon('file') }}管理员推送<span class="nav-index">03</span></a>
         <p class="nav-caption">群聊自动化 / AUTOMATION</p>
         <a class="nav-link" href="#welcome-config" data-view="welcome-config">{{ icon('chat') }}欢迎消息</a>
         <a class="nav-link" href="#summary-config" data-view="summary-config">{{ icon('file') }}群聊总结</a>
@@ -181,6 +182,7 @@
             <div class="ai-validation" id="ai-validation" role="alert" hidden></div>
             {{ save('保存全部 AI 设置') }}
         </form></section>
+        {% include 'admin_push.html' %}
         <section class="view" id="welcome-config" aria-label="欢迎消息" hidden><form id="welcome-config-form"><div class="settings-columns"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">MESSAGE TEMPLATE</p><h2>第一句，留点温度。</h2></div>{{ icon('chat') }}</div><div class="field"><label for="welcome-message">欢迎消息模板</label><textarea id="welcome-message" rows="9" placeholder="欢迎 {user_name} 加入 {chat_title}！"></textarea><small>可使用下列变量，发送时会自动替换。</small></div><div class="variable-list"><code>{user_name}</code><span>成员名称</span><code>{user_mention}</code><span>提及成员</span><code>{chat_title}</code><span>群聊名称</span></div></section><section class="preview-panel"><p class="eyebrow">LIVE PREVIEW / 实时预览</p><div class="chat-preview"><span class="preview-avatar">@</span><div><span class="preview-name">小蜗助手 <span>BOT</span></span><div id="welcome-preview"></div><span class="preview-time">示例消息 · 仅预览文本</span></div></div><p class="footnote">预览使用示例成员；实际格式以 Telegram 展示为准。</p></section></div>{{ save('保存欢迎消息') }}</form></section>
         <section class="view" id="summary-config" aria-label="群聊总结" hidden><form id="summary-config-form"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">CHAT DIGEST</p><h2>留住重点，而不是每条消息。</h2></div>{{ icon('file') }}</div><div class="form-grid">{{ field('summary-interval','总结间隔 / 小时','number','系统按此间隔执行自动总结。',min='1',max='168',value='24') }}{{ field('min-messages','最少消息数','number','消息达到此数量后才触发总结。',min='5',max='1000',value='50') }}</div><div class="field"><label for="summary-prompt">总结提示词</label><textarea id="summary-prompt" rows="7" placeholder="请总结以下群聊对话的主要内容和话题："></textarea><small>告诉 AI 你关心什么，例如主要话题、关键结论或待办事项。</small></div><div class="editorial-note"><p>自动总结的功能开关位于 <a href="#overview">系统概览</a>，此处修改总结规则。</p></div></section>{{ save('保存总结设置') }}</form></section>
         <section class="view" id="history-config" aria-label="历史记录" hidden><form id="history-config-form"><section class="panel narrow-panel"><div class="panel-heading"><div><p class="eyebrow">DATA RETENTION</p><h2>让记录，恰到好处。</h2></div>{{ icon('clock') }}</div>{{ switch('history-cleanup-enabled','自动清理历史记录','定期清理超过保留期限的记录。') }}{{ field('history-cleanup-retention-days','保留天数','number','过期记录会被自动清理，请根据需要设置。',min='1',max='365',value='30') }}<div class="editorial-note"><span>关于对话上下文</span><p>此处管理历史记录清理策略。机器人记住的对话轮数，请前往 <a href="#ai-config">AI 配置</a> 设置。</p></div></section>{{ save('保存历史记录设置') }}</form></section>
@@ -192,6 +194,7 @@
 </div>
 <div class="toast" id="notification-toast" role="status" aria-live="polite" aria-atomic="true"><span class="toast-symbol" aria-hidden="true">i</span><div id="toast-message"></div><button class="icon-button" id="dismiss-toast" aria-label="关闭通知">×</button></div>
 <script src="{{ url_for('static', filename='ai-config.js') }}"></script>
+<script src="{{ url_for('static', filename='admin-push.js') }}"></script>
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

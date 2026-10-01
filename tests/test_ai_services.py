@@ -3,6 +3,7 @@
 import copy
 import importlib
 import sys
+from datetime import datetime
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -41,16 +42,40 @@ class AIServicesTests(unittest.IsolatedAsyncioTestCase):
             "active_system_prompt_id": "a",
         })
         history = [{"role": "user", "content": "hi"}]
-        await self.service.chat_completion(history)
-        self.assertEqual(self.text.complete.call_args.args[2][0]["content"], "first")
-        self.manager.apply_updates({"features.chat.active_system_prompt_id": "b"})
-        await self.service.chat_completion(history)
-        self.assertEqual(self.text.complete.call_args.args[2], [{"role": "system", "content": "second"}] + history)
-        self.assertEqual(len(history), 1)
-        await self.service.chat_completion(history, system_prompt="")
-        self.assertEqual(self.text.complete.call_args.args[2][0]["content"], "")
-        await self.service.chat_completion(history, role="task")
-        self.assertNotEqual(self.text.complete.call_args.args[2][0]["content"], "second")
+        date_context = "当前日期：2026-01-02。"
+        with patch.object(service_module, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 1, 2, 12)
+            await self.service.chat_completion(history)
+            self.assertEqual(self.text.complete.call_args.args[2][0]["content"], f"first\n\n{date_context}")
+            self.manager.apply_updates({"features.chat.active_system_prompt_id": "b"})
+            await self.service.chat_completion(history)
+            self.assertEqual(self.text.complete.call_args.args[2], [{"role": "system", "content": f"second\n\n{date_context}"}] + history)
+            self.assertEqual(history, [{"role": "user", "content": "hi"}])
+            self.assertEqual(self.manager.get("features.chat.system_prompt"), "second")
+            await self.service.chat_completion(history, system_prompt="")
+            self.assertEqual(self.text.complete.call_args.args[2][0]["content"], date_context)
+            await self.service.chat_completion(history, role="task", system_prompt="task instructions")
+            self.assertEqual(self.text.complete.call_args.args[2][0]["content"], f"task instructions\n\n{date_context}")
+            await self.service.chat_completion(history, role="task")
+            self.assertNotIn("second", self.text.complete.call_args.args[2][0]["content"])
+            self.assertIn(date_context, self.text.complete.call_args.args[2][0]["content"])
+
+    async def test_current_date_refreshes_on_each_request_without_changing_config_or_history(self):
+        original_config = copy.deepcopy(self.manager.config)
+        history = [{"role": "user", "content": "今天是哪一天？"}]
+        original_history = copy.deepcopy(history)
+        with patch.object(service_module, "datetime") as clock:
+            clock.now.side_effect = [datetime(2026, 12, 31, 23, 59), datetime(2027, 1, 1)]
+            await self.service.chat_completion(history)
+            await self.service.chat_completion(history)
+        first = self.text.complete.call_args_list[0].args[2][0]["content"]
+        second = self.text.complete.call_args_list[1].args[2][0]["content"]
+        self.assertTrue(first.endswith("\n\n当前日期：2026-12-31。"))
+        self.assertTrue(second.endswith("\n\n当前日期：2027-01-01。"))
+        self.assertNotIn("2026-12-31", second)
+        self.assertEqual(second.count("当前日期："), 1)
+        self.assertEqual(history, original_history)
+        self.assertEqual(self.manager.config, original_config)
 
     async def test_chat_uses_chat_model_and_passes_user_context(self):
         await self.service.chat_completion([{"role": "user", "content": "hi"}], user_id=42, chat_id=99)
@@ -141,11 +166,13 @@ class WebSearchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_search_summarizes_with_sources_and_valid_markdown(self):
-        with patch.object(self.web_search, "search", AsyncMock(return_value=self.outcome)) as search:
+        with patch.object(self.web_search, "search", AsyncMock(return_value=self.outcome)) as search, \
+                patch.object(service_module, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 1, 2, 12)
             reply = await self.service.search_web("GPT-6", 42)
         search.assert_awaited_once()
         provider, model, messages = self.text.complete.call_args.args
-        self.assertEqual(messages[0]["content"], self.web_search.SEARCH_SUMMARY_PROMPT)
+        self.assertEqual(messages[0]["content"], f"{self.web_search.SEARCH_SUMMARY_PROMPT}\n\n当前日期：2026-01-02。")
         self.assertIn("摘要 a.b-c!", messages[1]["content"])
         self.assertIn("[搜索 - Microsoft 必应 (中文)](https://cn.bing.com/?q=a_b)", reply)
         rendered = helpers.to_markdown_v2(reply)

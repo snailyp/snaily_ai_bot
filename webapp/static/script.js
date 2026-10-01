@@ -5,6 +5,7 @@ class BotControlPanel {
         this.config = {};
         this.csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
         this.aiEditor = new AIConfigEditor(this);
+        this.adminPush = new AdminPushPanel(this);
         this.init();
     }
 
@@ -20,6 +21,7 @@ class BotControlPanel {
         const pages = {
             overview: ['系统概览', 'WORKSPACE OVERVIEW', '每一项能力，都在你的掌控之中。'],
             'ai-config': ['AI 配置', 'AI WORKSPACE', '连接模型，调好属于你的对话与创作体验。'],
+            'admin-push': ['管理员推送', 'EDITOR’S DESK', '认真创作，明确确认，让每一条消息有序抵达。'],
             'welcome-config': ['欢迎消息', 'FIRST IMPRESSIONS', '给每一位新成员，一句恰到好处的问候。'],
             'summary-config': ['群聊总结', 'CONVERSATION DIGEST', '从热闹的讨论中，留下真正重要的事。'],
             'history-config': ['历史记录', 'DATA & MEMORY', '管理记录的保留周期，让工作空间保持轻盈。'],
@@ -48,6 +50,7 @@ class BotControlPanel {
             document.getElementById('breadcrumb-title').textContent = title;
             document.getElementById('page-eyebrow').textContent = eyebrow;
             document.getElementById('page-description').textContent = description;
+            this.adminPush.onViewChange(id);
             document.title = `${title} · 小蜗控制台`;
             this.setNavigationOpen(false);
             if (focus) {
@@ -101,8 +104,12 @@ class BotControlPanel {
     }
 
     markDirty(form) {
+        // 独立编辑器管理自己的保存状态；非配置表单不一定有保存提示。
+        if (form.dataset.independentState === 'true') return;
+        const state = form.querySelector('.save-state');
+        if (!state) return;
         form.classList.add('dirty');
-        form.querySelector('.save-state').textContent = '有未保存的修改';
+        state.textContent = '有未保存的修改';
     }
 
     markSaved(formId) {

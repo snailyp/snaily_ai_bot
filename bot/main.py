@@ -74,6 +74,7 @@ class TelegramBot:
 
     def __init__(self):
         self.application = None
+        self.admin_push = None
         self.scheduler = AsyncIOScheduler()
         self.loop = None
         self.shutdown_event = asyncio.Event()  # 新增: 用于优雅停机的事件
@@ -104,6 +105,7 @@ class TelegramBot:
 
             # 在机器人事件循环内应用 AI/MCP 配置。
             await ai_services.reload_config()
+            self.setup_admin_push()
 
             # 设置定时任务
             await self.setup_schedulers()
@@ -117,6 +119,21 @@ class TelegramBot:
             # 确保在失败时清理状态
             self.application = None
             raise
+
+    def setup_admin_push(self):
+        """先建立共享存储，Web 可编辑草稿；此时尚不恢复发送。"""
+        if self.admin_push is None:
+            from bot.services.admin_push.service import AdminPushService
+            self.admin_push = AdminPushService()
+
+    async def start_admin_push(self):
+        """仅在 Telegram 客户端完成初始化后启动持久推送。"""
+        from bot.services.admin_push.runtime import AdminPushRuntime
+        self.setup_admin_push()
+        runtime = self.admin_push.runtime
+        if runtime is None:
+            runtime = AdminPushRuntime(self.admin_push, self.application.bot, ai_services, self.scheduler)
+        await runtime.start()
 
     def request_reschedule(self):
         """从任意线程请求主事件循环重新加载定时任务。"""
@@ -283,6 +300,7 @@ class TelegramBot:
         await self.application.start()
         if self.application.updater is None:
             raise RuntimeError("应用程序更新器未初始化")
+        await self.start_admin_push()
 
         logger.info("开始启动机器人...")
 
@@ -318,6 +336,9 @@ class TelegramBot:
         try:
             logger.info("开始停止机器人...")
             self.shutdown_event.set()  # 触发停机事件，让 start_polling 退出
+
+            if self.admin_push is not None and self.admin_push.runtime is not None:
+                await self.admin_push.runtime.stop()
 
             # 停止调度器
             if self.scheduler and self.scheduler.running:

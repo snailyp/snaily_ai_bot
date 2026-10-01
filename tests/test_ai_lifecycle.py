@@ -22,12 +22,13 @@ class AILifecycleTests(unittest.IsolatedAsyncioTestCase):
         namespace = {"asyncio": asyncio, "AsyncIOScheduler": Mock(return_value=self.scheduler),
                      "Application": application, "ai_services": self.ai, "logger": Mock(),
                      "config_manager": Mock(get_bot_token=Mock(return_value="test-token")),
-                     "Update": Any, "CallbackContext": Any}
+                     "Update": SimpleNamespace(MESSAGE="message", CHAT_MEMBER="chat_member"), "CallbackContext": Any}
         exec(compile(ast.Module(body=[definition], type_ignores=[]), str(path), "exec"), namespace)
         bot = namespace["TelegramBot"]()
         bot.register_handlers = Mock()
         bot.setup_schedulers = AsyncMock()
         bot.setup_bot_commands = AsyncMock()
+        bot.setup_admin_push = Mock()  # 不创建真实推送数据库。
         return bot
 
     async def test_setup_and_idempotent_stop_close_ai_resources(self):
@@ -58,6 +59,28 @@ class AILifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await asyncio.to_thread(bot.request_ai_reload))
         await asyncio.wait_for(completed.wait(), timeout=1)
         self.assertEqual(observed, [loop])
+
+    async def test_push_starts_after_telegram_initialization(self):
+        bot = self.build_bot()
+        await bot.setup_bot()
+        order = []
+        self.app.initialize = AsyncMock(side_effect=lambda: order.append("initialize"))
+        self.app.start = AsyncMock(side_effect=lambda: order.append("start"))
+        bot.start_admin_push = AsyncMock(side_effect=lambda: order.append("push"))
+        self.app.updater.start_polling = AsyncMock(side_effect=asyncio.CancelledError)
+        await bot.start_polling()
+        self.assertEqual(order, ["initialize", "start", "push"])
+
+    async def test_push_stops_before_telegram_and_ai(self):
+        bot = self.build_bot()
+        await bot.setup_bot()
+        order = []
+        bot.admin_push = SimpleNamespace(runtime=SimpleNamespace(
+            stop=AsyncMock(side_effect=lambda: order.append("push"))))
+        self.app.stop.side_effect = lambda: order.append("telegram")
+        self.ai.aclose.side_effect = lambda: order.append("ai")
+        await bot.stop()
+        self.assertEqual(order, ["push", "telegram", "ai"])
 
     async def test_reload_is_not_queued_without_running_bot(self):
         bot = self.build_bot()

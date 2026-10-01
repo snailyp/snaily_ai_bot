@@ -458,7 +458,7 @@ class MediaConversationTests(unittest.IsolatedAsyncioTestCase):
         result = await service.chat_completion([{'role': 'user', 'content': 'x'}], user_id=1, vision=True, strict=True, system_prompt='current prompt')
         self.assertEqual(result, 'vision answer')
         self.assertEqual(generator.complete.call_args.args[1]['model'], 'vision-model')
-        self.assertEqual(generator.complete.call_args.args[2][0]['content'], 'current prompt')
+        self.assertRegex(generator.complete.call_args.args[2][0]['content'], r'^current prompt\n\n当前日期：\d{4}-\d{2}-\d{2}。$')
         mcp.list_tools.assert_not_called()
         self.assertEqual(generator.complete.call_args.kwargs['tools'], [])
 

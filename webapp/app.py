@@ -5,6 +5,7 @@ Web 控制面板应用
 
 import os
 import sys
+import threading
 from typing import Any, Optional
 
 from flask import Flask
@@ -13,6 +14,7 @@ from loguru import logger
 
 from config.settings import config_manager
 from webapp.middleware.auth_middleware import register_auth_middleware
+from webapp.routes.admin_push import bp as admin_push_bp
 from webapp.routes.ai_api import bp as ai_api_bp
 from webapp.routes.auth import bp as auth_bp
 from webapp.routes.config_api import bp as config_api_bp
@@ -32,9 +34,13 @@ class CustomFlask(Flask):
     bot: Optional[Any] = None
 
 
-def create_app(bot_instance: Optional[Any] = None) -> CustomFlask:
+def create_app(bot_instance: Optional[Any] = None, *, push_service=None) -> CustomFlask:
     """创建并配置 Flask 应用"""
     app = CustomFlask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 11 * 1024 * 1024
+    app.extensions["admin_push_lock"] = threading.Lock()
+    if push_service is not None:
+        app.extensions["admin_push"] = push_service
 
     # 存储 bot 实例
     if bot_instance:
@@ -56,6 +62,7 @@ def create_app(bot_instance: Optional[Any] = None) -> CustomFlask:
     app.register_blueprint(config_api_bp)
     app.register_blueprint(features_api_bp)
     app.register_blueprint(ai_api_bp)
+    app.register_blueprint(admin_push_bp)
     app.register_blueprint(koyeb_api_bp)
     app.register_blueprint(status_api_bp)
     app.register_blueprint(errors_bp)

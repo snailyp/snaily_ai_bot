@@ -4,6 +4,7 @@ AI 功能入口。模型连接、文本协议、绘图和 MCP 分别由独立模
 
 import os
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import openai
@@ -70,6 +71,8 @@ class AIServices:
             provider, model = resolve_media_model(ai_config, "vision") if vision else resolve_text_model(ai_config, role)
             if system_prompt is None:
                 system_prompt = resolve_chat_prompt(self.config_manager.get("features.chat", {})) if role == "chat" else "请根据用户提供的资料和任务要求，用中文准确、简洁地回答。"
+            date_context = f"当前日期：{datetime.now():%Y-%m-%d}。"
+            system_prompt = f"{system_prompt}\n\n{date_context}" if system_prompt else date_context
             messages = [{"role": "system", "content": system_prompt}] + history
             tools = []
             if not vision and role == "chat" and model.get("supports_tools") and user_id is not None:

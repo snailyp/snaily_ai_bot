@@ -19,6 +19,7 @@ python-dotenv==1.0.0
 requests==2.31.0
 PyYAML==6.0.1
 pytz==2023.3.post1
+Pillow==12.3.0
 
 # 异步支持（asyncio 使用 Python 标准库）
 aiohttp==3.9.1
