@@ -189,7 +189,8 @@ class SpeechService:
     async def synthesize(self, provider, model, text):
         if not text or len(text) > 2000:
             raise MediaError("朗读内容为空或超过 2,000 字符，仅发送文字。")
+        # WAV is the most widely supported format among compatible proxies; ffmpeg re-encodes to Opus.
         audio = await self._request(provider, "audio/speech", limit=MAX_BYTES,
                                     json={"model": model["model"], "voice": model["voice"],
-                                          "input": text, "response_format": "opus"})
+                                          "input": text, "response_format": "wav"})
         return await self.processor.convert(audio, voice=True)

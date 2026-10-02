@@ -174,7 +174,7 @@ MCP 是机器人连接外部工具的**客户端**能力，不是将本机器人
 | 能力 | 服务商协议 | 配置分区 |
 | --- | --- | --- |
 | 语音识别 | OpenAI-compatible `POST /audio/transcriptions`，multipart WAV，JSON `text` | `asr` |
-| 语音回复 | OpenAI-compatible `POST /audio/speech`，`voice` 音色，Opus 二进制输出 | `tts` |
+| 语音回复 | OpenAI-compatible `POST /audio/speech`，`voice` 音色，请求 WAV 后本地转为 Opus 语音 | `tts` |
 | 图片理解 | Chat Completions 的 `image_url` 或 Responses 的 `input_image` | `vision` |
 
 Base URL 填到 API 版本根路径（例如 `/v1`），不要包含上表中的最终端点。ASR/TTS 服务必须支持这些协议，不能仅凭 `/models` 成功判断。视觉模型必须支持图片输入；携带仍有效图片的后续聊天也使用视觉模型，沿用当前系统提示词且不调用 MCP。图片过期后只保留明确占位说明，并恢复普通文字模型。不包含文档图片、图片编辑或视频理解。

@@ -192,7 +192,7 @@ class SpeechTests(unittest.IsolatedAsyncioTestCase):
         stream = BytesStream([b'ogg', b'audio'])
         def handler(request):
             self.assertEqual(request.headers['authorization'], 'Custom private')
-            self.assertEqual(json.loads(request.content)['response_format'], 'opus')
+            self.assertEqual(json.loads(request.content)['response_format'], 'wav')
             return httpx.Response(200, stream=stream)
         service = self.service(handler)
         provider, model = resolve_media_model(configuration(), 'tts')
