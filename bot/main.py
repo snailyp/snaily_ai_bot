@@ -125,6 +125,9 @@ class TelegramBot:
         if self.admin_push is None:
             from bot.services.admin_push.service import AdminPushService
             self.admin_push = AdminPushService()
+        if not getattr(self.admin_push, 'smart_tasks', None):
+            from bot.services.smart_tasks.service import SmartTaskService
+            self.admin_push.smart_tasks = SmartTaskService(self.admin_push, config_manager)
 
     async def start_admin_push(self):
         """仅在 Telegram 客户端完成初始化后启动持久推送。"""
@@ -134,6 +137,11 @@ class TelegramBot:
         if runtime is None:
             runtime = AdminPushRuntime(self.admin_push, self.application.bot, ai_services, self.scheduler)
         await runtime.start()
+        from bot.services.smart_tasks.runtime import SmartTaskRuntime
+        smart = self.admin_push.smart_tasks
+        if smart.runtime is None:
+            SmartTaskRuntime(smart, ai_services, self.scheduler)
+        await smart.runtime.start()
 
     def request_reschedule(self):
         """从任意线程请求主事件循环重新加载定时任务。"""
@@ -337,6 +345,9 @@ class TelegramBot:
             logger.info("开始停止机器人...")
             self.shutdown_event.set()  # 触发停机事件，让 start_polling 退出
 
+            smart = getattr(self.admin_push, 'smart_tasks', None)
+            if smart is not None and smart.runtime is not None:
+                await smart.runtime.stop()
             if self.admin_push is not None and self.admin_push.runtime is not None:
                 await self.admin_push.runtime.stop()
 

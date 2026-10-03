@@ -14,6 +14,7 @@ from loguru import logger
 
 from config.settings import config_manager
 from webapp.middleware.auth_middleware import register_auth_middleware
+from webapp.routes.smart_tasks import bp as smart_tasks_bp
 from webapp.routes.admin_push import bp as admin_push_bp
 from webapp.routes.ai_api import bp as ai_api_bp
 from webapp.routes.auth import bp as auth_bp
@@ -63,6 +64,7 @@ def create_app(bot_instance: Optional[Any] = None, *, push_service=None) -> Cust
     app.register_blueprint(features_api_bp)
     app.register_blueprint(ai_api_bp)
     app.register_blueprint(admin_push_bp)
+    app.register_blueprint(smart_tasks_bp)
     app.register_blueprint(koyeb_api_bp)
     app.register_blueprint(status_api_bp)
     app.register_blueprint(errors_bp)

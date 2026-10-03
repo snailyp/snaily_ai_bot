@@ -150,7 +150,7 @@ def _defaults():
         "mcp": {
             "enabled": False, "admin_only": True,
             "allowed_user_ids": [], "allowed_chat_ids": [],
-            "max_rounds": 4, "max_calls": 8, "timeout": 30,
+            "max_rounds": 40, "max_calls": 50, "timeout": 30,
             "max_result_chars": 12000, "servers": [],
         },
         "search": {
@@ -268,7 +268,7 @@ def normalize_ai_config(raw):
         for server in mcp["servers"]:
             _fill_defaults(server, {
                 "name": "", "enabled": False, "transport": "stdio", "url": "", "command": "",
-                "args": [], "env": {}, "headers": {}, "allowed_tools": [], "timeout": 30,
+                "args": [], "env": {}, "headers": {}, "allowed_tools": [], "timeout": 30, "background": False,
             })
     search = value.get("search")
     if isinstance(search, dict) and isinstance(search.get("providers"), list):
@@ -457,9 +457,10 @@ def validate_ai_config(config):
     _number(mcp["timeout"], "mcp.timeout", minimum=0.001)
     for server in _rows(mcp["servers"], "mcp.servers").values():
         path = "mcp.servers"
-        _only_fields(server, {"id", "name", "enabled", "transport", "url", "command", "args", "env", "headers", "allowed_tools", "timeout"}, path)
+        _only_fields(server, {"id", "name", "enabled", "transport", "url", "command", "args", "env", "headers", "allowed_tools", "timeout", "background"}, path)
         _string(server["name"], path + ".name")
         _boolean(server["enabled"], path + ".enabled")
+        _boolean(server["background"], path + ".background")
         _enum(server["transport"], {"stdio", "streamable_http", "sse"}, path + ".transport")
         _url(server["url"], path + ".url", required=server["enabled"] and server["transport"] != "stdio")
         _string(server["command"], path + ".command", required=server["enabled"] and server["transport"] == "stdio")
@@ -571,6 +572,14 @@ def resolve_text_model(ai_config, role="chat"):
     value = validate_ai_config(ai_config)
     selection = "task_model_id" if role == "task" and value["text"]["task_model_id"] else "chat_model_id"
     return _resolve(value["text"], selection, "text." + selection)
+
+
+def resolve_text_model_by_id(ai_config, model_id=""):
+    """Resolve an explicit model; blank follows the global task selection."""
+    if not model_id:
+        return resolve_text_model(ai_config, "task")
+    value = validate_ai_config(ai_config)
+    return _resolve(dict(value["text"], _selected=model_id), "_selected", "text.model_id")
 
 
 def resolve_image_model(ai_config):

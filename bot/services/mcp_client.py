@@ -29,6 +29,7 @@ from bot.services.mcp_images import prepare_image_result
 class MCPToolResult:
     text: str
     images: tuple[ImageResult, ...] = ()
+    is_error: bool = False
 
 
 MAX_TOOLS = 128
@@ -550,7 +551,7 @@ class MCPClientManager:
         text = _result_text(sanitized, limit)
         if images:
             text = _truncate("[MCP images attached for delivery to the user]\n" + text, limit)
-        return MCPToolResult(text, tuple(images))
+        return MCPToolResult(text, tuple(images), bool(_field(result, 'isError', False)))
 
     async def _call_tool(self, name, arguments, user_id, chat_id=None):
         initial = self._config()

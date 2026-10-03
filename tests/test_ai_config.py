@@ -84,7 +84,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(first["schema_version"], 2)
         self.assertEqual(first["mcp"], {
             "enabled": False, "admin_only": True, "allowed_user_ids": [], "allowed_chat_ids": [],
-            "max_rounds": 4, "max_calls": 8, "timeout": 30, "max_result_chars": 12000, "servers": [],
+            "max_rounds": 40, "max_calls": 50, "timeout": 30, "max_result_chars": 12000, "servers": [],
         })
         second["text"]["providers"].append({"id": "new"})
         self.assertEqual(first["text"]["providers"], [])

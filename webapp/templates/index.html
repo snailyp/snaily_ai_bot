@@ -52,6 +52,7 @@
     <meta name="csrf-token" content="{{ csrf_token | default('') }}">
     <meta name="theme-color" content="#242622"><title>小蜗 · 控制台</title>
     <link rel="icon" href="data:,"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='smart-tasks.css') }}">
 </head>
 <body>
 <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -78,6 +79,7 @@
         <p class="nav-caption">工作空间 / WORKSPACE</p>
         <a class="nav-link active" href="#overview" data-view="overview">{{ icon('grid') }}系统概览<span class="nav-index">01</span></a>
         <a class="nav-link" href="#ai-config" data-view="ai-config">{{ icon('spark') }}AI 配置<span class="nav-index">02</span></a>
+        <a class="nav-link" href="#smart-tasks" data-view="smart-tasks">{{ icon('clock') }}智能任务<span class="nav-index">04</span></a>
         <a class="nav-link" href="#admin-push" data-view="admin-push">{{ icon('file') }}管理员推送<span class="nav-index">03</span></a>
         <p class="nav-caption">群聊自动化 / AUTOMATION</p>
         <a class="nav-link" href="#welcome-config" data-view="welcome-config">{{ icon('chat') }}欢迎消息</a>
@@ -146,6 +148,7 @@
                         <div class="ai-editor-body"><div class="ai-empty" id="mcp-server-empty"><span class="ai-empty-index">MCP</span><h3>先从一个可信服务开始。</h3><p>支持 stdio、Streamable HTTP 和 SSE。新服务默认关闭，不会自动启动。</p></div>
                             <fieldset class="ai-editor" id="mcp-server-editor" hidden><legend class="sr-only">编辑 MCP 服务</legend><div class="ai-editor-heading"><span class="tiny-label">SERVER / 独立开关与权限</span><button type="button" class="btn btn-quiet danger-text" id="remove-mcp-server">删除服务</button></div>
                                 {{ switch('mcp-server-enabled','启用此服务','仅当全局 MCP 同时开启时才允许连接。') }}
+                                {{ switch('mcp-server-background','允许后台任务使用','默认关闭。启用后，管理员可将此服务器授权给无人值守的智能任务；写操作可能产生外部影响。') }}
                                 <div class="form-grid">{{ field('mcp-server-name','服务名称',placeholder='例如：团队知识库') }}<div class="field"><label for="mcp-server-transport">传输方式</label><select id="mcp-server-transport"><option value="stdio">stdio · 本地进程</option><option value="streamable_http">Streamable HTTP</option><option value="sse">SSE</option></select></div></div>
                                 <div id="mcp-stdio-fields"><div class="ai-warning"><strong>stdio 会在服务器上执行命令。</strong><p>仅填写你信任的可执行文件。连接或探测时会启动进程；参数按 JSON 数组传递，不通过 Shell 解析。</p></div>{{ field('mcp-server-command','可执行命令',hint='单独填写程序名或完整路径，不要拼接参数。',placeholder='例如：uvx 或 /usr/local/bin/tool-server') }}<div class="field"><label for="mcp-server-args">参数 / JSON 字符串数组</label><textarea id="mcp-server-args" rows="3" spellcheck="false" placeholder='["--port", "8080"]'></textarea><small>例如 ["package-name", "--read-only"]；不支持 Shell 命令字符串。</small></div><details class="ai-details"><summary>环境变量 <span>密钥值不会回显</span></summary><div id="mcp-server-env"></div></details></div>
                                 <div id="mcp-http-fields" hidden>{{ field('mcp-server-url','服务 URL','url',hint='填写完整的 MCP 端点地址。',placeholder='https://example.com/mcp') }}<details class="ai-details"><summary>请求头 <span>如 Authorization</span></summary><div id="mcp-server-headers"></div></details></div>
@@ -183,6 +186,7 @@
             {{ save('保存全部 AI 设置') }}
         </form></section>
         {% include 'admin_push.html' %}
+        {% include 'smart_tasks.html' %}
         <section class="view" id="welcome-config" aria-label="欢迎消息" hidden><form id="welcome-config-form"><div class="settings-columns"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">MESSAGE TEMPLATE</p><h2>第一句，留点温度。</h2></div>{{ icon('chat') }}</div><div class="field"><label for="welcome-message">欢迎消息模板</label><textarea id="welcome-message" rows="9" placeholder="欢迎 {user_name} 加入 {chat_title}！"></textarea><small>可使用下列变量，发送时会自动替换。</small></div><div class="variable-list"><code>{user_name}</code><span>成员名称</span><code>{user_mention}</code><span>提及成员</span><code>{chat_title}</code><span>群聊名称</span></div></section><section class="preview-panel"><p class="eyebrow">LIVE PREVIEW / 实时预览</p><div class="chat-preview"><span class="preview-avatar">@</span><div><span class="preview-name">小蜗助手 <span>BOT</span></span><div id="welcome-preview"></div><span class="preview-time">示例消息 · 仅预览文本</span></div></div><p class="footnote">预览使用示例成员；实际格式以 Telegram 展示为准。</p></section></div>{{ save('保存欢迎消息') }}</form></section>
         <section class="view" id="summary-config" aria-label="群聊总结" hidden><form id="summary-config-form"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">CHAT DIGEST</p><h2>留住重点，而不是每条消息。</h2></div>{{ icon('file') }}</div><div class="form-grid">{{ field('summary-interval','总结间隔 / 小时','number','系统按此间隔执行自动总结。',min='1',max='168',value='24') }}{{ field('min-messages','最少消息数','number','消息达到此数量后才触发总结。',min='5',max='1000',value='50') }}</div><div class="field"><label for="summary-prompt">总结提示词</label><textarea id="summary-prompt" rows="7" placeholder="请总结以下群聊对话的主要内容和话题："></textarea><small>告诉 AI 你关心什么，例如主要话题、关键结论或待办事项。</small></div><div class="editorial-note"><p>自动总结的功能开关位于 <a href="#overview">系统概览</a>，此处修改总结规则。</p></div></section>{{ save('保存总结设置') }}</form></section>
         <section class="view" id="history-config" aria-label="历史记录" hidden><form id="history-config-form"><section class="panel narrow-panel"><div class="panel-heading"><div><p class="eyebrow">DATA RETENTION</p><h2>让记录，恰到好处。</h2></div>{{ icon('clock') }}</div>{{ switch('history-cleanup-enabled','自动清理历史记录','定期清理超过保留期限的记录。') }}{{ field('history-cleanup-retention-days','保留天数','number','过期记录会被自动清理，请根据需要设置。',min='1',max='365',value='30') }}<div class="editorial-note"><span>关于对话上下文</span><p>此处管理历史记录清理策略。机器人记住的对话轮数，请前往 <a href="#ai-config">AI 配置</a> 设置。</p></div></section>{{ save('保存历史记录设置') }}</form></section>
@@ -195,6 +199,7 @@
 <div class="toast" id="notification-toast" role="status" aria-live="polite" aria-atomic="true"><span class="toast-symbol" aria-hidden="true">i</span><div id="toast-message"></div><button class="icon-button" id="dismiss-toast" aria-label="关闭通知">×</button></div>
 <script src="{{ url_for('static', filename='ai-config.js') }}"></script>
 <script src="{{ url_for('static', filename='admin-push.js') }}"></script>
+<script src="{{ url_for('static', filename='smart-tasks.js') }}"></script>
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

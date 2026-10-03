@@ -82,7 +82,7 @@
                 ...ai, schema_version: 2,
                 text: { providers: [], models: [], chat_model_id: '', task_model_id: '', ...ai.text },
                 drawing: { providers: [], models: [], active_model_id: '', ...ai.drawing },
-                mcp: { enabled: false, admin_only: true, allowed_user_ids: [], allowed_chat_ids: [], max_rounds: 4, max_calls: 8, timeout: 30, max_result_chars: 12000, servers: [], ...ai.mcp },
+                mcp: { enabled: false, admin_only: true, allowed_user_ids: [], allowed_chat_ids: [], max_rounds: 40, max_calls: 50, timeout: 30, max_result_chars: 12000, servers: [], ...ai.mcp },
                 search: { enabled: true, max_results: 5, summarize: true, fallback: true, active_provider_id: '', providers: [], ...ai.search }
             };
             for (const kind of ['asr', 'tts', 'vision']) this.draft[kind] = { enabled: false, providers: [], models: [], active_model_id: '', ...ai[kind] };
@@ -237,7 +237,7 @@
             }
             $('add-mcp-server').addEventListener('click', () => this.add('mcp', 'server'));
             $('remove-mcp-server').addEventListener('click', () => this.remove('mcp', 'server'));
-            for (const [suffix, key, type] of [['name', 'name'], ['enabled', 'enabled', 'boolean'], ['transport', 'transport'], ['command', 'command'], ['url', 'url'], ['timeout', 'timeout', 'number']]) {
+            for (const [suffix, key, type] of [['name', 'name'], ['enabled', 'enabled', 'boolean'], ['background', 'background', 'boolean'], ['transport', 'transport'], ['command', 'command'], ['url', 'url'], ['timeout', 'timeout', 'number']]) {
                 this.bind(`mcp-server-${suffix}`, () => this.current('mcp', 'server'), key, type, () => {
                     this.renderList('mcp', 'server');
                     this.renderTransport();
@@ -592,6 +592,7 @@
             if (!server) return;
             for (const key of ['name', 'transport', 'command', 'url', 'timeout']) $(`mcp-server-${key}`).value = server[key] ?? '';
             $('mcp-server-enabled').checked = Boolean(server.enabled);
+            $('mcp-server-background').checked = Boolean(server.background);
             $('mcp-server-args').value = this.rawFor(server).args ?? JSON.stringify(server.args || [], null, 2);
             $('mcp-server-tools').value = this.rawFor(server).tools ?? (server.allowed_tools || []).join('\n');
             this.renderSecrets($('mcp-server-env'), server, 'env', '环境变量');
@@ -623,7 +624,7 @@
             if (collection === 'provider' && kind === 'search') item = { id: this.newId(), name: `新搜索服务 ${count}`, type: 'exa', enabled: true, api_base_url: '', api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 30 };
             else if (collection === 'provider') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}服务商 ${count}`, api_base_url: IMAGE_PROTOCOLS.openai_images.url, api_key: '', api_key_set: false, headers: {}, headers_set: [], timeout: 60, ...(kind === 'drawing' ? { type: 'openai_images' } : {}) };
             else if (collection === 'model') item = { id: this.newId(), name: `新${kind === 'drawing' ? '图像' : '文本'}模型 ${count}`, provider_id: this.selected[`${kind}-provider`] || '', model: '', parameters: {}, ...(kind === 'tts' ? {voice: 'alloy'} : {}), ...(['text', 'vision'].includes(kind) ? { api_type: 'chat_completions', token_limit_field: 'max_completion_tokens', supports_tools: false } : {}) };
-            else item = { id: this.newId(), name: `新工具服务 ${count}`, enabled: false, transport: 'stdio', url: '', command: '', args: [], env: {}, env_set: [], headers: {}, headers_set: [], allowed_tools: [], timeout: 30 };
+            else item = { id: this.newId(), name: `新工具服务 ${count}`, enabled: false, background: false, transport: 'stdio', url: '', command: '', args: [], env: {}, env_set: [], headers: {}, headers_set: [], allowed_tools: [], timeout: 30 };
             this.items(kind, collection).push(item);
             this.selected[`${kind}-${collection}`] = item.id;
             this.renderList(kind, collection);

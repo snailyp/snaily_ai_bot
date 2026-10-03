@@ -373,6 +373,8 @@ class PushStore:
 
     @staticmethod
     def _editable(task):
+        if task['kind'] == 'smart':
+            _error('智能任务投递由任务运行管理，不能单独修改或取消。')
         if task["first_started_at"] is not None:
             _error("This task has already started sending", "already_started")
         if task["state"] not in {"queued", "scheduled"}:
@@ -512,7 +514,7 @@ class PushStore:
     def _terminal(self, db, id, state):
         now = self._now()
         db.execute(
-            "UPDATE tasks SET state=?, version=version+1, finished_at=?, expires_at=? WHERE id=?",
+            "UPDATE tasks SET state=?, version=version+1, finished_at=?, expires_at=CASE WHEN kind='smart' THEN NULL ELSE ? END WHERE id=?",
             (state, now, now + TERMINAL_LIFETIME, id),
         )
 
@@ -547,6 +549,12 @@ class PushStore:
                 _error("Only explicitly failed parts may be retried")
             for asset_id in self._asset_ids(task):
                 self._asset(db, asset_id)
+            if task['kind'] == 'smart':
+                run = db.execute('SELECT id,task_id FROM smart_runs WHERE delivery_id=?', (id,)).fetchone()
+                if run:
+                    if db.execute("SELECT 1 FROM smart_runs WHERE task_id=? AND id!=? AND state IN ('queued','running','delivering')", (run['task_id'], run['id'])).fetchone():
+                        _error('同一智能任务已有运行在进行，请稍后重试投递。')
+                    db.execute("UPDATE smart_runs SET state='delivering',finished_at=NULL WHERE id=?", (run['id'],))
             db.executemany("UPDATE parts SET state='unattempted' WHERE id=? AND state='failed'", [(p,) for p in part_ids])
             db.execute(
                 """UPDATE tasks SET state='queued', version=version+1, run_no=run_no+1,
@@ -574,6 +582,8 @@ class PushStore:
                 return replay
             task = self._task(db, id)
             self._version(task, expected_version)
+            if task['kind'] == 'smart':
+                _error('智能任务投递随运行记录保留，不能单独删除。')
             if task["state"] not in TERMINAL_STATES:
                 _error("Cancel or finish an active task before deleting it")
             self._delete_owner(db, "task", id, "deleted")

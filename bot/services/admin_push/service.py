@@ -135,7 +135,7 @@ class AdminPushService:
         return self.decorate(task)
 
     def list_tasks(self):
-        return [self.decorate(item) for item in self.store.list_tasks()]
+        return [self.decorate(item) for item in self.store.list_tasks() if item['kind'] != 'smart']
 
     def get_task(self, task_id):
         return self.decorate(self.store.get_task(task_id))

@@ -180,12 +180,14 @@ class TextGenerator:
         limits: Optional[dict] = None,
         *,
         allow_empty_text: Optional[Callable[[], bool]] = None,
+        usage_observer=None,
+        strict_tools=False,
     ) -> str:
         limits = limits or {}
         tools = tools if model.get("supports_tools") and tool_caller else []
         tools_by_name = {tool["name"]: tool for tool in tools or []}
-        max_rounds = limits.get("max_rounds", 4)
-        max_calls = limits.get("max_calls", 8)
+        max_rounds = limits.get("max_rounds", 40)
+        max_calls = limits.get("max_calls", 50)
         max_result_chars = limits.get("max_result_chars", 12000)
         used_calls = 0
         state = [dict(message) for message in messages]
@@ -265,7 +267,20 @@ class TextGenerator:
                         ]
                         state.append({key: message[key] for key in ("role", "content", "tool_calls") if key in message})
 
+                    if usage_observer:
+                        usage_response = response
+                        if isinstance(usage_response, str):
+                            try:
+                                usage_response = json.loads(usage_response)
+                            except ValueError:
+                                usage_response = _response_from_sse(usage_response)
+                        usage = usage_response.get('usage') if isinstance(usage_response, dict) else getattr(usage_response, 'usage', None)
+                        if usage is not None:
+                            usage = _as_dict(usage)
+                            usage_observer({key: value for key, value in usage.items() if type(value) is int and value >= 0})
                     if not calls:
+                        if strict_tools and not normal_finish:
+                            raise TextGenerationError("模型回复未正常完成，不投递部分结果。")
                         if not text and not (normal_finish and allow_empty_text and allow_empty_text()):
                             raise TextGenerationError("模型未返回文本，可能拒绝了请求或输出额度不足。")
                         return text
@@ -276,7 +291,7 @@ class TextGenerator:
 
                     for call in calls:
                         used_calls += 1
-                        result = await self._execute_tool(call, tools_by_name, tool_caller, limits.get("timeout", 30))
+                        result = await self._execute_tool(call, tools_by_name, tool_caller, limits.get("timeout", 30), strict=strict_tools)
                         if len(result) > max_result_chars:
                             result = result[:max_result_chars] + "\n[工具结果已截断]"
                         if is_responses:
@@ -300,27 +315,34 @@ class TextGenerator:
             raise TextGenerationError(f"模型请求失败{hint}，请检查接口类型、模型名称及已启用的参数。") from None
 
     @staticmethod
-    async def _execute_tool(call: dict, tools: dict, caller: Callable, timeout: float) -> str:
+    async def _execute_tool(call: dict, tools: dict, caller: Callable, timeout: float, *, strict=False) -> str:
+        def failure(message):
+            if strict:
+                raise TextGenerationError(message)
+            return json.dumps({'error': message}, ensure_ascii=False, separators=(',', ':'))
+
         name = call.get("name")
         if name not in tools:
-            return json.dumps({"error": "工具未获许可或不存在"}, ensure_ascii=False)
+            return failure("工具未获许可或不存在")
+        raw = call.get("arguments", "{}")
+        if not isinstance(raw, str) or len(raw.encode("utf-8")) > 32768:
+            return failure("工具参数过大或格式错误")
         try:
-            raw = call.get("arguments", "{}")
-            if not isinstance(raw, str) or len(raw.encode("utf-8")) > 32768:
-                return '{"error":"工具参数过大或格式错误"}'
             arguments = json.loads(raw)
             if not isinstance(arguments, dict):
-                return '{"error":"工具参数必须是对象"}'
+                return failure("工具参数必须是对象")
             validate(arguments, tools[name]["parameters"])
+        except TextGenerationError:
+            raise
         except (ValueError, ValidationError):
-            return '{"error":"工具参数不符合声明的结构"}'
+            return failure("工具参数不符合声明的结构")
         try:
             return str(await asyncio.wait_for(caller(name, arguments), timeout=timeout))
         except asyncio.TimeoutError:
-            return '{"error":"工具调用超时，未自动重试"}'
+            return failure("工具调用超时，未自动重试")
         except Exception:
-            # MCP 上游错误可能包含 URL、请求头或工具参数，不能原样送回模型/日志。
-            return '{"error":"工具调用失败或已停用，未自动重试"}'
+            # 上游错误可能包含凭证；后台任务失败关闭，聊天仍允许模型处理错误。
+            return failure("工具调用失败或已停用，未自动重试")
 
     async def aclose(self):
         """请求级客户端在 complete 的 async with 中释放。"""
