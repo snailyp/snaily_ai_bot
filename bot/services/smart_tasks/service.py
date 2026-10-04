@@ -55,6 +55,10 @@ class SmartTaskService:
             raise PushError('任务定义必须是对象。')
         definition = {k: bounded_text(value.get(k, ''), label, limit, required) for k, label, limit, required in (
             ('name', '名称', 100, True), ('prompt', '提示词', 20000, True), ('model_id', '模型标识', 256, False))}
+        send_images = value.get('send_images', True)
+        if type(send_images) is not bool:
+            raise PushError('send_images 必须是布尔值。')
+        definition['send_images'] = send_images
         targets = normalize_composition({'targets': value.get('targets', [])}, allow_empty=True)['targets']
         if not targets or len(targets) > 100:
             raise PushError('请填写1至100个明确的收件目标。')

@@ -418,6 +418,16 @@ class SmartRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.push.assets.cleanup_files()
         self.assertTrue(self.push.assets.path(asset).exists())
 
+    async def test_generated_image_can_be_kept_in_text_without_photo_delivery(self):
+        stream = io.BytesIO(); Image.new('RGB',(20,20),'red').save(stream,format='PNG')
+        self.task = self.service.save({'definition':definition(send_images=False), 'enabled':False, 'idempotency_key':'save-text-only'})
+        self.generator.return_value = ('![配图](https://example.invalid/image.png)', [ImageResult(data=stream.getvalue())])
+        run = await self.run_task()
+        self.assertEqual(run['state'],'succeeded')
+        self.sender.send_photo.assert_not_called()
+        self.assertEqual(self.sender.send_message.await_count,2)
+        self.assertEqual(run['delivery']['composition']['asset_ids'], [])
+
 
 if __name__ == '__main__':
     unittest.main()

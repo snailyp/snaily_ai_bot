@@ -83,6 +83,8 @@ class SmartTaskRuntime:
         text, images = await self.generator(run, self.ai, self.store, self.service.clock)
         if text.strip() == SKIP_MARKER:
             return text, None, None, True
+        if run['snapshot'].get('send_images', True) is False:
+            images = []
         asset_ids = []
         for image in images[:4]:
             asset = await self.service.push.assets.add_generated(image)

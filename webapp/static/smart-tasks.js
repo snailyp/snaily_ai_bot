@@ -79,7 +79,8 @@ class SmartTaskPanel {
         return {enabled: this.el('enabled').checked, definition: {
             name: this.el('name').value, prompt: this.el('prompt').value, model_id: this.el('model').value,
             server_ids: [...this.el('servers').querySelectorAll('input:checked')].map(el => el.value),
-            targets: this.el('targets').value, failure_target: this.el('failure-target').value, schedule,
+            targets: this.el('targets').value, failure_target: this.el('failure-target').value,
+            send_images: this.el('send-images').checked, schedule,
             limits: {max_rounds: Number(this.el('rounds').value), max_calls: Number(this.el('calls').value), timeout_seconds: Number(this.el('timeout').value)}
         }};
     }
@@ -113,6 +114,7 @@ class SmartTaskPanel {
         const d = task?.definition || {};
         this.el('name').value = d.name || ''; this.el('prompt').value = d.prompt || '';
         this.el('targets').value = (d.targets || []).join(', '); this.el('failure-target').value = d.failure_target || '';
+        this.el('send-images').checked = d.send_images !== false;
         this.el('enabled').checked = task?.enabled || false;
         const s = d.schedule || {kind:'manual'};
         this.el('schedule').value = s.kind; this.el('at').value = s.at || '';
