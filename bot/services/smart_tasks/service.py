@@ -6,6 +6,8 @@ from config.ai_config import resolve_text_model_by_id
 from .schedule import normalize_schedule
 from .store import SmartStore
 
+LIMIT_RANGES = (('max_rounds', 8, 40), ('max_calls', 16, 50), ('timeout_seconds', 600, 1800))
+
 
 def bounded_text(value, label, maximum, required=False):
     if not isinstance(value, str) or len(value) > maximum or '\x00' in value or any(0xD800 <= ord(c) <= 0xDFFF for c in value):
@@ -80,7 +82,7 @@ class SmartTaskService:
         if not isinstance(limits, dict):
             raise PushError('运行上限必须是对象。')
         definition['limits'] = {}
-        for key, default, maximum in (('max_rounds', 8, 40), ('max_calls', 16, 50), ('timeout_seconds', 600, 1800)):
+        for key, default, maximum in LIMIT_RANGES:
             number = limits.get(key, default)
             if type(number) is not int or not 1 <= number <= maximum:
                 raise PushError(f'{key}须为1至{maximum}的整数。')

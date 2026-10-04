@@ -14,8 +14,10 @@ class SmartTaskPanel {
         this.runId = null;
         this.epoch = 0;
         this.keys = new Map();
+        this.candidate = null;
+        this.writing = false;
         this.el('form').addEventListener('submit', e => { e.preventDefault(); this.save(); });
-        this.el('form').addEventListener('input', () => this.controls());
+        this.el('form').addEventListener('input', () => { this.staleWrite(); this.controls(); });
         this.el('schedule').addEventListener('change', () => this.scheduleFields());
         this.el('new').addEventListener('click', () => { if (this.replaceAllowed()) this.load(null); });
         this.el('refresh').addEventListener('click', () => this.refresh());
@@ -27,6 +29,11 @@ class SmartTaskPanel {
         });
         this.el('run').addEventListener('click', () => this.start('manual'));
         this.el('test').addEventListener('click', () => this.start('test'));
+        this.el('write').addEventListener('click', () => this.toggleWrite());
+        this.el('write-go').addEventListener('click', () => this.runWrite());
+        this.el('write-cancel').addEventListener('click', () => this.closeWrite());
+        this.el('write-adopt').addEventListener('click', () => this.adoptWrite());
+        this.el('write-discard').addEventListener('click', () => this.discardWrite());
         this.el('pause').addEventListener('click', () => this.change(this.selected?.enabled ? 'pause' : 'enable'));
         this.el('delete').addEventListener('click', () => this.change('delete'));
         this.el('all-runs').addEventListener('click', () => { this.filter = null; this.offset = 0; this.epoch++; this.refresh(); });
@@ -115,6 +122,8 @@ class SmartTaskPanel {
         this.choices(d.model_id || '', d.server_ids || []);
         this.el('editor-title').textContent = task ? d.name : '新建智能任务';
         this.el('version').textContent = task ? `版本 ${task.version}` : '未保存';
+        this.el('wish').value = '';
+        this.clearWrite();
         this.saved = JSON.stringify(this.formData());
         this.filter = task?.id || null; this.offset = 0;
         this.scheduleFields(); this.renderTasks();
@@ -125,6 +134,8 @@ class SmartTaskPanel {
         for (const id of ['save','new']) this.el(id).disabled = this.busy;
         for (const id of ['run','test']) this.el(id).disabled = this.busy || !this.selected || dirty || !this.options.ready;
         for (const id of ['pause','delete']) this.el(id).disabled = this.busy || !this.selected || dirty;
+        for (const id of ['write','write-go']) this.el(id).disabled = this.busy || this.writing;
+        this.el('write-adopt').disabled = !this.candidate;
         this.el('pause').textContent = this.selected?.enabled ? '暂停排程' : '启用排程';
     }
     async action(fn) {
@@ -146,6 +157,63 @@ class SmartTaskPanel {
             else { this.selected = task; this.saved = snapshot; this.el('version').textContent = `版本 ${task.version}`; }
             this.panel.showNotification('智能任务已保存。', 'success');
         });
+    }
+    toggleWrite() {
+        const panel = this.el('write-panel');
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) this.el('wish').focus();
+        this.controls();
+    }
+    clearWrite() {
+        this.candidate = null;
+        this.el('write-text').textContent = '';
+        this.el('write-candidate').hidden = true;
+        this.el('write-status').hidden = true;
+        this.el('write-status').textContent = '';
+    }
+    staleWrite() {
+        if (!this.candidate) return;
+        this.clearWrite();
+        this.el('write-status').hidden = false;
+        this.el('write-status').textContent = '任务内容已变化，旧帮写候选已放弃；可重新生成。';
+    }
+    closeWrite() {
+        this.el('write-panel').hidden = true;
+        this.clearWrite();
+        this.controls();
+    }
+    async runWrite() {
+        if (this.writing) return;
+        this.error('');
+        if (!this.el('name').value.trim()) return this.error('请先填写任务名称，AI 才知道要写什么。');
+        const snapshot = JSON.stringify(this.formData());
+        this.writing = true; this.controls();
+        this.el('write-status').hidden = false;
+        this.el('write-status').textContent = '正在生成候选提示词…';
+        try {
+            const {text} = await this.api('/prompt', {...this.formData().definition, requirement: this.el('wish').value.trim()});
+            if (snapshot !== JSON.stringify(this.formData())) { this.staleWrite(); return; }
+            this.candidate = text;
+            this.el('write-text').textContent = text;
+            this.el('write-label').textContent = '提示词候选 / 尚未采用';
+            this.el('write-candidate').hidden = false;
+            this.el('write-status').textContent = '候选已就绪；采用后仍需保存任务才会生效。';
+        } catch (error) {
+            this.el('write-status').hidden = true;
+            this.error(`帮写失败：${error.message}`);
+        } finally { this.writing = false; this.controls(); }
+    }
+    adoptWrite() {
+        if (!this.candidate) return;
+        const text = this.candidate;
+        this.clearWrite();
+        this.el('prompt').value = text;
+        this.controls();
+        this.panel.showNotification('已采用候选提示词；保存任务后才会生效。', 'success');
+    }
+    discardWrite() {
+        this.clearWrite();
+        this.controls();
     }
     async change(action) {
         const task = this.selected; if (!task) return;

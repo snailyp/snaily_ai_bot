@@ -1,8 +1,11 @@
 """智能任务接口；沿用管理台登录、同源和 CSRF 防护。"""
+import asyncio
+
 from flask import Blueprint, current_app, jsonify, request
 
 from config.settings import config_manager
 from bot.services.admin_push import PushError
+from bot.services.smart_tasks import writer
 from .admin_push import api, data, private_response, service as push_service
 
 bp = Blueprint('smart_tasks', __name__, url_prefix='/api/smart-tasks')
@@ -34,6 +37,15 @@ def tasks():
 @api
 def save():
     return jsonify(success=True, task=service().save(data()))
+
+
+@bp.post('/prompt')
+@api
+def draft_prompt():
+    """提示词帮写：同步调用一次文本模型，只返回候选，不写任务定义也不排队运行。"""
+    module = service()
+    context, provider, model = writer.prepare(module.manager.get_ai_config(), data())
+    return jsonify(success=True, text=asyncio.run(writer.generate(provider, model, context)))
 
 
 @bp.get('/tasks/<task_id>')

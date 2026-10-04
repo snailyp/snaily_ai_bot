@@ -3,9 +3,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from bot.services.admin_push.service import AdminPushService
+from bot.services.smart_tasks import writer
 from bot.services.smart_tasks.service import SmartTaskService
 from test_smart_tasks import definition, ai_config
 from test_ai_api import app_module, make_manager
@@ -67,6 +68,26 @@ class SmartTaskAPITests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/smart-tasks/runs?offset=-1').status_code,400)
         self.assertEqual(self.post('/tasks',[]).status_code,400)
 
+    def test_prompt_draft_returns_a_candidate_without_touching_tasks(self):
+        with patch.object(writer, 'generate', new=AsyncMock(return_value='整理后的提示词')) as generate:
+            response = self.post('/prompt', {**definition(), 'requirement': '只保留重要变化'})
+        self.assertEqual(response.status_code,200,response.json)
+        self.assertEqual(response.json['text'],'整理后的提示词')
+        self.assertEqual(response.headers['Cache-Control'],'private, no-store')
+        self.assertEqual(self.service.store.list_tasks(),[])
+        self.assertEqual(self.service.store.list_runs(),[])
+        context, provider, model = generate.call_args.args
+        self.assertEqual((context['name'],context['requirement'],context['servers']),('每日简报','只保留重要变化',['Tools']))
+        self.assertEqual(model['id'],'model-a')
+
+    def test_prompt_draft_requires_name_and_a_usable_model(self):
+        response = self.post('/prompt', {'prompt':'写点东西'})
+        self.assertEqual(response.status_code,400)
+        self.assertIn('任务名称',response.json['error'])
+        response = self.post('/prompt', {**definition(), 'model_id':'missing-model'})
+        self.assertEqual(response.status_code,400)
+        self.assertIn('所选模型不可用',response.json['error'])
+
     def test_runtime_unavailable_still_allows_save(self):
         self.service.runtime.ready = False
         task = self.task()
@@ -83,6 +104,7 @@ class SmartTaskAPITests(unittest.TestCase):
         for path in ('/options','/tasks','/runs'):
             self.assertEqual(self.client.get('/api/smart-tasks'+path).status_code,401)
         self.assertEqual(self.post('/tasks',payload).status_code,401)
+        self.assertEqual(self.post('/prompt',definition()).status_code,401)
 
 
 if __name__ == '__main__':

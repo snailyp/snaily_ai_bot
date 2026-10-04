@@ -3,13 +3,14 @@ from copy import deepcopy
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from playwright.sync_api import expect
 import test_frontend as shared
 from test_ai_api import app_module, make_manager
 from test_smart_tasks import ai_config, definition
 from bot.services.admin_push.service import AdminPushService
+from bot.services.smart_tasks import writer
 from bot.services.smart_tasks.service import SmartTaskService
 
 
@@ -82,6 +83,41 @@ class SmartTaskFrontend(unittest.TestCase):
         self.page.set_viewport_size({'width':390,'height':844})
         self.assertTrue(self.page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
         self.page.screenshot(path=str(self.artifacts/'smart-tasks-mobile.png'),full_page=True)
+
+    def test_prompt_writer_candidate_is_adopted_only_on_demand(self):
+        self.open('smart-tasks')
+        self.page.locator('#smart-name').fill('晨间要闻')
+        self.page.locator('#smart-write').click()
+        self.page.locator('#smart-wish').fill('每天早上播报 AI 要闻')
+        with patch.object(writer,'generate',new=AsyncMock(return_value='整理后的提示词：核实来源后播报，没有变化不推送。')):
+            self.page.locator('#smart-write-go').click()
+            expect(self.page.locator('#smart-write-text')).to_have_text('整理后的提示词：核实来源后播报，没有变化不推送。')
+        expect(self.page.locator('#smart-write-label')).to_contain_text('尚未采用')
+        expect(self.page.locator('#smart-prompt')).to_have_value('')
+        self.assertEqual(self.service.store.list_tasks()[0]['definition']['prompt'],definition()['prompt'])
+        self.assertEqual(self.smart_posts[-1][0],'/api/smart-tasks/prompt')
+        self.assertEqual(self.smart_posts[-1][1]['requirement'],'每天早上播报 AI 要闻')
+        self.page.locator('#smart-write-adopt').click()
+        expect(self.page.locator('#smart-prompt')).to_have_value('整理后的提示词：核实来源后播报，没有变化不推送。')
+        expect(self.page.locator('#smart-save-state')).to_contain_text('未保存')
+        self.assertEqual(self.service.store.list_tasks()[0]['definition']['prompt'],definition()['prompt'])
+        self.page.locator('#smart-targets').fill('-1001')
+        self.page.locator('#smart-save').click()
+        expect(self.page.locator('#smart-version')).to_have_text('版本 1')
+        saved = next(t for t in self.service.store.list_tasks() if t['definition']['name']=='晨间要闻')
+        self.assertEqual(saved['definition']['prompt'],'整理后的提示词：核实来源后播报，没有变化不推送。')
+
+    def test_editing_after_writing_discards_the_candidate(self):
+        self.open('smart-tasks')
+        with patch.object(writer,'generate',new=AsyncMock(return_value='候选提示词')):
+            self.page.locator('#smart-name').fill('晨间要闻')
+            self.page.locator('#smart-write').click()
+            self.page.locator('#smart-write-go').click()
+            expect(self.page.locator('#smart-write-text')).to_have_text('候选提示词')
+        self.page.locator('#smart-prompt').fill('我自己写的')
+        expect(self.page.locator('#smart-write-candidate')).not_to_be_visible()
+        expect(self.page.locator('#smart-write-status')).to_contain_text('旧帮写候选已放弃')
+        expect(self.page.locator('#smart-prompt')).to_have_value('我自己写的')
 
     def test_manual_and_test_run_use_saved_version_and_explicit_test_target(self):
         self.select_existing()
